@@ -1805,7 +1805,7 @@ else:
     3. **Clicca su Analizza** per visualizzare tutti i dati finanziari
     
     ### Funzionalità Principali
-    
+    - ✅ Valutazione Azione intelligente tramite DCF, DDM etc.
     - ✅ Grafici interattivi personalizzabili
     - ✅ Analisi storica fino a 20 periodi
     - ✅ Dati trimestrali e annuali
@@ -1827,8 +1827,6 @@ else:
     
     ### Note Importanti
     
-    - I dati sono forniti da Financial Modeling Prep API
-    - La valuta viene automaticamente rilevata in base all'exchange
     - I grafici sono completamente interattivi e personalizzabili
     """)
 
