@@ -1183,18 +1183,19 @@ if st.session_state.analyzed:
                         eps = safe_get(latest_income, 'eps', 0)
                         
                         if eps > 0 and ratios_data:
-                            col1, col2 = st.columns(2)
+                            # Calcola P/E medio storico PRIMA di creare le colonne
+                            df_ratios_hist = pd.DataFrame(ratios_data)
+                            pe_values = df_ratios_hist['priceEarningsRatio'].dropna()
+                            pe_values = pe_values[(pe_values > 0) & (pe_values < 100)]  # Filtro outlier
                             
-                            with col1:
-                                # Calcola P/E medio storico
-                                df_ratios_hist = pd.DataFrame(ratios_data)
-                                pe_values = df_ratios_hist['priceEarningsRatio'].dropna()
-                                pe_values = pe_values[(pe_values > 0) & (pe_values < 100)]  # Filtro outlier
+                            if len(pe_values) > 0:
+                                pe_avg = pe_values.mean()
+                                pe_median = pe_values.median()
                                 
-                                if len(pe_values) > 0:
-                                    pe_avg = pe_values.mean()
-                                    pe_median = pe_values.median()
-                                    
+                                # ORA crea le colonne, dopo aver calcolato pe_avg
+                                col1, col2 = st.columns(2)
+                                
+                                with col1:
                                     intrinsic_value_pe_avg = eps * pe_avg
                                     intrinsic_value_pe_med = eps * pe_median
                                     
@@ -1208,35 +1209,37 @@ if st.session_state.analyzed:
                                     st.metric("Upside/Downside (P/E Avg)", f"{upside_pe:+.1f}%", 
                                              delta=f"{upside_pe:+.1f}%",
                                              delta_color="normal")
-                            
-                            with col2:
-                                # Grafico P/E storico
-                                fig_pe = go.Figure()
                                 
-                                df_ratios_plot = df_ratios_hist.sort_values('date')
-                                df_ratios_plot['year'] = pd.to_datetime(df_ratios_plot['date']).dt.year
-                                
-                                fig_pe.add_trace(go.Scatter(
-                                    x=df_ratios_plot['year'],
-                                    y=df_ratios_plot['priceEarningsRatio'],
-                                    mode='lines+markers',
-                                    name='P/E Ratio',
-                                    line=dict(color='#1f77b4', width=3)
-                                ))
-                                
-                                # Linea P/E medio
-                                fig_pe.add_hline(y=pe_avg, line_dash="dash", line_color="green", 
-                                                annotation_text=f"Media: {pe_avg:.2f}x")
-                                
-                                fig_pe.update_layout(
-                                    title="P/E Ratio Storico",
-                                    xaxis_title="Anno",
-                                    yaxis_title="P/E Ratio",
-                                    template='plotly_white',
-                                    height=350
-                                )
-                                
-                                st.plotly_chart(fig_pe, use_container_width=True)
+                                with col2:
+                                    # Grafico P/E storico
+                                    fig_pe = go.Figure()
+                                    
+                                    df_ratios_plot = df_ratios_hist.sort_values('date')
+                                    df_ratios_plot['year'] = pd.to_datetime(df_ratios_plot['date']).dt.year
+                                    
+                                    fig_pe.add_trace(go.Scatter(
+                                        x=df_ratios_plot['year'],
+                                        y=df_ratios_plot['priceEarningsRatio'],
+                                        mode='lines+markers',
+                                        name='P/E Ratio',
+                                        line=dict(color='#1f77b4', width=3)
+                                    ))
+                                    
+                                    # Linea P/E medio (ora pe_avg è accessibile!)
+                                    fig_pe.add_hline(y=pe_avg, line_dash="dash", line_color="green", 
+                                                    annotation_text=f"Media: {pe_avg:.2f}x")
+                                    
+                                    fig_pe.update_layout(
+                                        title="P/E Ratio Storico",
+                                        xaxis_title="Anno",
+                                        yaxis_title="P/E Ratio",
+                                        template='plotly_white',
+                                        height=350
+                                    )
+                                    
+                                    st.plotly_chart(fig_pe, use_container_width=True)
+                            else:
+                                st.warning("⚠️ Dati P/E insufficienti per l'analisi dei multipli")
                         else:
                             st.warning("⚠️ EPS non disponibile o negativo")
                         
