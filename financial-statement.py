@@ -1825,7 +1825,7 @@ else:
     
     **Titoli popolari da provare:**
     - 🇺🇸 USA: AAPL, MSFT, GOOGL, AMZN, TSLA, NVDA
-    - 🇪🇺 Europa: SAP.DE, ASML, MC.PA, OR.PA
+    - 🇪🇺 Europa: SAP.DE, ASML.AS, MC.PA, OR.PA
     - 🇮🇹 Italia: ENI.MI, ISP.MI, UCG.MI, RACE.MI
     
     ### Note Importanti
