@@ -1319,8 +1319,203 @@ if st.session_state.analyzed:
                         
                         st.markdown("---")
                         
-                        # 5. Riepilogo Valutazioni
-                        st.subheader("Riepilogo Valutazioni")
+                        # 5. FCFE Model (Free Cash Flow to Equity)
+                        st.subheader("5. FCFE - Free Cash Flow to Equity")
+                        
+                        # Calcolo FCFE = FCF + Net Borrowing - Debt Repayment
+                        fcf = safe_get(latest_cashflow, 'freeCashFlow', 0)
+                        debt_repayment = safe_get(latest_cashflow, 'debtRepayment', 0)
+                        net_borrowings = safe_get(latest_cashflow, 'netBorrowings', 0)
+                        
+                        if fcf != 0:
+                            col1, col2 = st.columns(2)
+                            
+                            with col1:
+                                # FCFE = FCF + Net Borrowings - Debt Repayment
+                                fcfe_current = fcf + net_borrowings - abs(debt_repayment)
+                                
+                                # Calcola crescita storica FCFE
+                                if len(df_cashflow_hist) >= 3:
+                                    fcfe_values = []
+                                    for _, row in df_cashflow_hist.head(5).iterrows():
+                                        fcf_h = safe_get(row, 'freeCashFlow', 0)
+                                        debt_rep_h = safe_get(row, 'debtRepayment', 0)
+                                        net_bor_h = safe_get(row, 'netBorrowings', 0)
+                                        fcfe_h = fcf_h + net_bor_h - abs(debt_rep_h)
+                                        fcfe_values.append(fcfe_h)
+                                    
+                                    fcfe_growth_rates = []
+                                    for i in range(len(fcfe_values)-1):
+                                        if fcfe_values[i+1] != 0 and fcfe_values[i] != 0:
+                                            growth = ((fcfe_values[i] / fcfe_values[i+1]) - 1) * 100
+                                            if -50 < growth < 200:  # Filtro outlier
+                                                fcfe_growth_rates.append(growth)
+                                    
+                                    avg_fcfe_growth = sum(fcfe_growth_rates) / len(fcfe_growth_rates) if fcfe_growth_rates else 5.0
+                                    avg_fcfe_growth = max(-10.0, min(100.0, avg_fcfe_growth))
+                                else:
+                                    avg_fcfe_growth = 5.0
+                                
+                                fcfe_growth_rate = avg_fcfe_growth / 100
+                                
+                                # Proiezioni FCFE
+                                fcfe_projections = []
+                                for year in range(1, projection_years + 1):
+                                    fcfe_projected = fcfe_current * ((1 + fcfe_growth_rate) ** year)
+                                    pv = fcfe_projected / ((1 + discount_rate) ** year)
+                                    fcfe_projections.append({
+                                        'Anno': year,
+                                        'FCFE Proiettato': fcfe_projected,
+                                        'Valore Attuale': pv
+                                    })
+                                
+                                df_fcfe = pd.DataFrame(fcfe_projections)
+                                
+                                # Terminal Value
+                                fcfe_terminal_year = fcfe_current * ((1 + fcfe_growth_rate) ** projection_years)
+                                terminal_value_fcfe = (fcfe_terminal_year * (1 + terminal_growth)) / (discount_rate - terminal_growth)
+                                terminal_value_fcfe_pv = terminal_value_fcfe / ((1 + discount_rate) ** projection_years)
+                                
+                                # Equity Value (già diretto, non serve sottrarre debito)
+                                pv_fcfe_sum = df_fcfe['Valore Attuale'].sum()
+                                equity_value_fcfe = pv_fcfe_sum + terminal_value_fcfe_pv
+                                
+                                # Shares e Valore per Azione
+                                shares = safe_get(latest_income, 'weightedAverageShsOutDil', 0)
+                                if shares == 0:
+                                    shares = safe_get(latest_income, 'weightedAverageShsOut', 0)
+                                
+                                intrinsic_value_fcfe = equity_value_fcfe / shares if shares > 0 else 0
+                                
+                                # Metriche
+                                st.metric("FCFE Corrente", format_currency(fcfe_current, currency))
+                                st.metric("Crescita FCFE Storica", f"{avg_fcfe_growth:.1f}%")
+                                st.metric("Equity Value (FCFE)", format_currency(equity_value_fcfe, currency))
+                                st.metric("Valore Intrinseco FCFE", f"{get_currency_symbol(currency)}{intrinsic_value_fcfe:.2f}")
+                                
+                                if intrinsic_value_fcfe > 0:
+                                    upside_fcfe = ((intrinsic_value_fcfe - current_price) / current_price) * 100
+                                    st.metric("Upside/Downside", f"{upside_fcfe:+.1f}%", 
+                                             delta=f"{upside_fcfe:+.1f}%",
+                                             delta_color="normal")
+                            
+                            with col2:
+                                st.markdown("**Proiezioni FCFE**")
+                                
+                                # Mostra tabella proiezioni
+                                display_fcfe = df_fcfe.copy()
+                                display_fcfe['FCFE Proiettato'] = display_fcfe['FCFE Proiettato'].apply(lambda x: format_currency(x, currency))
+                                display_fcfe['Valore Attuale'] = display_fcfe['Valore Attuale'].apply(lambda x: format_currency(x, currency))
+                                st.dataframe(display_fcfe, use_container_width=True, hide_index=True)
+                                
+                                st.markdown(f"**Terminal Value:** {format_currency(terminal_value_fcfe, currency)}")
+                                st.markdown(f"**Terminal Value (PV):** {format_currency(terminal_value_fcfe_pv, currency)}")
+                                st.markdown(f"**Somma VP FCFE:** {format_currency(pv_fcfe_sum, currency)}")
+                                
+                                st.info("""
+                                **FCFE vs DCF:**
+                                - FCFE valuta direttamente l'equity (azionisti)
+                                - DCF valuta l'impresa (enterprise value)
+                                - FCFE incorpora i flussi di debito
+                                """)
+                        else:
+                            st.warning("⚠️ Dati insufficienti per calcolare il FCFE")
+                        
+                        st.markdown("---")
+                        
+                        # 6. Graham Number (Value Investing)
+                        st.subheader("6. Numero di Graham (Value Investing)")
+                        
+                        eps = safe_get(latest_income, 'eps', 0)
+                        book_value_per_share_graham = equity / shares if (equity > 0 and shares > 0) else 0
+                        
+                        if eps > 0 and book_value_per_share_graham > 0:
+                            col1, col2 = st.columns(2)
+                            
+                            with col1:
+                                # Formula di Graham: V = √(22.5 × EPS × BVPS)
+                                graham_number = (22.5 * eps * book_value_per_share_graham) ** 0.5
+                                
+                                # Formula alternativa di Graham con crescita
+                                # V = EPS × (8.5 + 2g) × 4.4 / Y
+                                # Stima crescita EPS
+                                if len(df_income_hist) >= 3:
+                                    eps_values = df_income_hist['eps'].head(5).values
+                                    eps_growth_rates = []
+                                    for i in range(len(eps_values)-1):
+                                        if eps_values[i+1] != 0 and eps_values[i] != 0 and eps_values[i+1] > 0 and eps_values[i] > 0:
+                                            growth = ((eps_values[i] / eps_values[i+1]) - 1) * 100
+                                            if -50 < growth < 100:
+                                                eps_growth_rates.append(growth)
+                                    avg_eps_growth = sum(eps_growth_rates) / len(eps_growth_rates) if eps_growth_rates else 7.0
+                                    avg_eps_growth = max(0.0, min(30.0, avg_eps_growth))
+                                else:
+                                    avg_eps_growth = 7.0
+                                
+                                # Yield obbligazionario AAA (default 4.4%)
+                                bond_yield = 4.4
+                                
+                                graham_growth_number = eps * (8.5 + 2 * avg_eps_growth) * 4.4 / bond_yield
+                                
+                                # Media delle due formule
+                                graham_value_avg = (graham_number + graham_growth_number) / 2
+                                
+                                # Margine di sicurezza di Graham (50%)
+                                margin_of_safety_price = graham_value_avg * 0.5
+                                
+                                st.metric("EPS", f"{get_currency_symbol(currency)}{eps:.2f}")
+                                st.metric("Book Value per Share", f"{get_currency_symbol(currency)}{book_value_per_share_graham:.2f}")
+                                st.metric("Crescita EPS Storica", f"{avg_eps_growth:.1f}%")
+                                st.metric("Graham Number (Base)", f"{get_currency_symbol(currency)}{graham_number:.2f}")
+                                st.metric("Graham Number (con Crescita)", f"{get_currency_symbol(currency)}{graham_growth_number:.2f}")
+                                st.metric("Valore Graham Medio", f"{get_currency_symbol(currency)}{graham_value_avg:.2f}")
+                                
+                                upside_graham = ((graham_value_avg - current_price) / current_price) * 100
+                                st.metric("Upside/Downside", f"{upside_graham:+.1f}%", 
+                                         delta=f"{upside_graham:+.1f}%",
+                                         delta_color="normal")
+                            
+                            with col2:
+                                st.markdown("**📝 Formule di Graham**")
+                                
+                                st.markdown("**Formula Base:**")
+                                st.latex(r"V = \sqrt{22.5 \times EPS \times BVPS}")
+                                
+                                st.markdown("**Formula con Crescita:**")
+                                st.latex(r"V = EPS \times (8.5 + 2g) \times \frac{4.4}{Y}")
+                                
+                                st.markdown("""
+                                Dove:
+                                - EPS = Earnings per Share
+                                - BVPS = Book Value per Share  
+                                - g = Tasso di crescita EPS (%)
+                                - Y = Yield obbligazioni AAA (default 4.4%)
+                                """)
+                                
+                                st.markdown("---")
+                                
+                                st.markdown("**💡 Margine di Sicurezza**")
+                                st.metric("Prezzo Target (50% MoS)", f"{get_currency_symbol(currency)}{margin_of_safety_price:.2f}")
+                                
+                                if current_price <= margin_of_safety_price:
+                                    st.success("✅ Il prezzo corrente rispetta il margine di sicurezza del 50%!")
+                                else:
+                                    diff = ((current_price - margin_of_safety_price) / margin_of_safety_price) * 100
+                                    st.warning(f"⚠️ Il prezzo corrente è del {diff:.1f}% sopra il margine di sicurezza")
+                                
+                                st.info("""
+                                **Filosofia Graham:**
+                                - Investire solo con margine di sicurezza
+                                - Focus su valore intrinseco solido
+                                - Acquistare quando sottovalutato
+                                """)
+                        else:
+                            st.warning("⚠️ Dati EPS o Book Value non disponibili per calcolare il Graham Number")
+                        
+                        st.markdown("---")
+                        
+                        # 7. Riepilogo Valutazioni
+                        st.subheader("Riepilogo Completo Valutazioni")
                         
                         valuations = []
                         
@@ -1352,6 +1547,20 @@ if st.session_state.analyzed:
                                 'Upside/Downside': ((intrinsic_value_pb - current_price) / current_price) * 100
                             })
                         
+                        if 'intrinsic_value_fcfe' in locals() and intrinsic_value_fcfe > 0:
+                            valuations.append({
+                                'Modello': 'FCFE (Free Cash Flow to Equity)',
+                                'Valore Intrinseco': intrinsic_value_fcfe,
+                                'Upside/Downside': ((intrinsic_value_fcfe - current_price) / current_price) * 100
+                            })
+                        
+                        if 'graham_value_avg' in locals() and graham_value_avg > 0:
+                            valuations.append({
+                                'Modello': 'Graham Number (Value Investing)',
+                                'Valore Intrinseco': graham_value_avg,
+                                'Upside/Downside': ((graham_value_avg - current_price) / current_price) * 100
+                            })
+                        
                         if valuations:
                             df_valuations = pd.DataFrame(valuations)
                             
@@ -1371,25 +1580,58 @@ if st.session_state.analyzed:
                                 st.dataframe(display_val, use_container_width=True, hide_index=True)
                             
                             with col2:
-                                # Valutazione media
+                                # Valutazione media e mediana
                                 avg_intrinsic = df_valuations['Valore Intrinseco'].mean()
+                                median_intrinsic = df_valuations['Valore Intrinseco'].median()
+                                std_intrinsic = df_valuations['Valore Intrinseco'].std()
+                                
                                 avg_upside = ((avg_intrinsic - current_price) / current_price) * 100
+                                median_upside = ((median_intrinsic - current_price) / current_price) * 100
+                                
+                                # Coefficiente di variazione (misura dispersione)
+                                cv = (std_intrinsic / avg_intrinsic * 100) if avg_intrinsic > 0 else 0
                                 
                                 st.metric("Prezzo Corrente", f"{get_currency_symbol(currency)}{current_price:.2f}")
                                 st.metric("Valore Medio", f"{get_currency_symbol(currency)}{avg_intrinsic:.2f}")
+                                st.metric("Valore Mediano", f"{get_currency_symbol(currency)}{median_intrinsic:.2f}")
                                 st.metric("Upside Medio", f"{avg_upside:+.1f}%",
                                          delta=f"{avg_upside:+.1f}%",
                                          delta_color="normal")
                                 
-                                # Giudizio
-                                if avg_upside > 20:
-                                    st.success("🟢 **Sottovalutato**")
-                                elif avg_upside > 0:
-                                    st.info("🟡 **Leggermente Sottovalutato**")
-                                elif avg_upside > -20:
-                                    st.warning("🟠 **Leggermente Sopravvalutato**")
+                                # Affidabilità della valutazione
+                                st.markdown("**Affidabilità Valutazione:**")
+                                if cv < 15:
+                                    st.success(f"🎯 Alta (CV: {cv:.1f}%)")
+                                    st.caption("I modelli sono molto concordi")
+                                elif cv < 30:
+                                    st.info(f"⚖️ Media (CV: {cv:.1f}%)")
+                                    st.caption("Discreta concordanza tra modelli")
                                 else:
-                                    st.error("🔴 **Sopravvalutato**")
+                                    st.warning(f"⚠️ Bassa (CV: {cv:.1f}%)")
+                                    st.caption("Alta dispersione tra i modelli")
+                                
+                                st.markdown("---")
+                                
+                                # Giudizio finale
+                                st.markdown("**🎯 Giudizio Finale:**")
+                                if avg_upside > 30:
+                                    st.success("### 🟢 FORTEMENTE SOTTOVALUTATO")
+                                    st.caption(f"Basato su {len(valuations)} modelli")
+                                elif avg_upside > 15:
+                                    st.success("### 🟢 SOTTOVALUTATO")
+                                    st.caption(f"Basato su {len(valuations)} modelli")
+                                elif avg_upside > 0:
+                                    st.info("### 🟡 LEGGERMENTE SOTTOVALUTATO")
+                                    st.caption(f"Basato su {len(valuations)} modelli")
+                                elif avg_upside > -15:
+                                    st.warning("### 🟠 LEGGERMENTE SOPRAVVALUTATO")
+                                    st.caption(f"Basato su {len(valuations)} modelli")
+                                elif avg_upside > -30:
+                                    st.error("### 🔴 SOPRAVVALUTATO")
+                                    st.caption(f"Basato su {len(valuations)} modelli")
+                                else:
+                                    st.error("### 🔴 FORTEMENTE SOPRAVVALUTATO")
+                                    st.caption(f"Basato su {len(valuations)} modelli")
                             
                             # Grafico comparativo
                             fig_comp = go.Figure()
