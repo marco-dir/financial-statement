@@ -3,7 +3,7 @@ import requests
 import pandas as pd
 import plotly.graph_objects as go
 import plotly.express as px
-from datetime import datetime
+from datetime import datetime, timedelta
 import os
 
 # ============================================
@@ -87,59 +87,491 @@ st.markdown("""
     </style>
     """, unsafe_allow_html=True)
 
-# Titolo applicazione
-st.title("Analisi Finanziaria Titoli Azionari")
-st.markdown("---")
+# ============================================
+# FUNZIONI DI RILEVAMENTO LINGUA E RICERCA TICKER
+# ============================================
 
-# Input controls sotto il titolo
-col1, col2, col3, col4 = st.columns([2, 2, 2, 2])
+def detect_query_language(query):
+    """
+    Rileva se la query è probabilmente italiana o inglese
+    per prioritizzare il mercato corretto
+    
+    Returns:
+        'IT' per italiano, 'US' per inglese
+    """
+    query_lower = query.lower().strip()
+    
+    # Liste di aziende italiane comuni (nomi completi o parziali)
+    italian_companies = [
+        # FTSE MIB - Blue Chips
+        'intesa', 'unicredit', 'eni', 'enel', 'ferrari', 'telecom', 
+        'generali', 'fiat', 'stellantis', 'leonardo', 'poste',
+        'saipem', 'tenaris', 'prysmian', 'moncler', 'campari',
+        'amplifon', 'buzzi', 'diasorin', 'inwit', 'italgas',
+        'recordati', 'snam', 'terna', 'pirelli', 'fineco',
+        
+        # Altri titoli FTSE MIB
+        'mediobanca', 'nexi', 'stm', 'stmicroelectronics', 'iveco',
+        'banca mediolanum', 'mediolanum', 'hera', 'a2a', 'banco bpm',
+        'bper', 'azimut', 'brunello cucinelli', 'cucinelli',
+        
+        # Mid Cap importanti
+        'banca generali', 'finecobank', 'reply', 'webuild', 'salini',
+        'atlantia', 'mondadori', 'cairo', 'rcs', 'mediaset', 'mfe',
+        'technogym', 'datalogic', 'el.en', 'elica', 'interpump',
+        'marr', 'iren', 'ascopiave', 'acea', 'edison',
+        
+        # Banche
+        'intesa sanpaolo', 'sanpaolo', 'banca popolare', 'monte paschi',
+        'mps', 'credem', 'creval', 'carige', 'popolare sondrio',
+        
+        # Utilities
+        'enel green', 'egp', 'alerion', 'falck', 'erg',
+        
+        # Lusso e Moda
+        'prada', 'salvatore ferragamo', 'ferragamo', 'brembo', 'tods',
+        'golden goose', 'aeffe', 'geox', 'basic',
+        
+        # Industria
+        'cnh', 'cnh industrial', 'fincantieri', 'danieli', 'interpump',
+        'marelli', 'brembo', 'sogefi', 'sabaf',
+        
+        # Tech e Telecom
+        'engineering', 'esprinet', 'digital value', 'retelit',
+        'reti', 'sparkle', 'inwit', 'cellnex',
+        
+        # Real Estate
+        'coima', 'covivio', 'igd siiq', 'beni stabili',
+        
+        # Food & Beverage
+        'davide campari', 'autogrill', 'deoleo', 'valsoia',
+        'newlat', 'la doria', 'orsero',
+        
+        # Farmaceutico e Healthcare
+        'diasorin', 'recordati', 'amplifon', 'molmed',
+        'el.en', 'philogen', 'newron', 'alfasigma'
+    ]
+    
+    # Liste di aziende USA/globali comuni in inglese
+    english_companies = [
+        # Mega Cap Tech (FAANG+)
+        'apple', 'microsoft', 'google', 'alphabet', 'amazon', 'meta', 'facebook',
+        'tesla', 'nvidia', 'netflix', 'intel', 'amd', 'oracle',
+        
+        # Tech Giants & Software
+        'cisco', 'ibm', 'dell', 'hp', 'hewlett packard', 'adobe', 'salesforce',
+        'servicenow', 'workday', 'snowflake', 'datadog', 'mongodb',
+        'zoom', 'slack', 'atlassian', 'splunk', 'twilio', 'okta',
+        'palantir', 'crowdstrike', 'cloudflare', 'docusign',
+        'autodesk', 'synopsys', 'cadence', 'ansys', 'intuit',
+        
+        # Semiconductors
+        'qualcomm', 'broadcom', 'texas instruments', 'micron',
+        'applied materials', 'lam research', 'kla', 'asml',
+        'marvell', 'analog devices', 'microchip', 'nxp', 'on semiconductor',
+        
+        # E-commerce & Digital
+        'shopify', 'ebay', 'etsy', 'wayfair', 'chewy', 'carvana',
+        'doordash', 'uber', 'lyft', 'airbnb', 'booking', 'expedia',
+        
+        # Fintech & Payments
+        'paypal', 'square', 'block', 'visa', 'mastercard', 'american express',
+        'discover', 'affirm', 'sofi', 'robinhood', 'coinbase',
+        
+        # Social Media & Entertainment
+        'snap', 'snapchat', 'pinterest', 'twitter', 'reddit',
+        'spotify', 'roblox', 'unity', 'electronic arts', 'activision',
+        'take-two', 'zynga', 'warner bros', 'paramount', 'comcast',
+        
+        # Streaming & Media
+        'disney', 'roku', 'fubo', 'iheartmedia', 'sirius xm',
+        
+        # Retail & Consumer
+        'walmart', 'target', 'costco', 'home depot', 'lowes',
+        'tjx', 'ross', 'dollar general', 'dollar tree', 'best buy',
+        'macys', 'nordstrom', 'kohls', 'gap', 'foot locker',
+        
+        # Food & Beverage
+        'coca cola', 'pepsi', 'pepsico', 'mondelez', 'kraft heinz',
+        'general mills', 'kellogg', 'conagra', 'tyson', 'hormel',
+        'campbell', 'hershey', 'monster beverage', 'celsius',
+        
+        # Restaurants
+        'mcdonalds', 'starbucks', 'chipotle', 'dominos', 'yum brands',
+        'restaurant brands', 'dunkin', 'wendys', 'shake shack',
+        'wingstop', 'dutch bros', 'panera',
+        
+        # Apparel & Footwear
+        'nike', 'lululemon', 'under armour', 'vf corp', 'ralph lauren',
+        'pvh', 'tapestry', 'capri', 'skechers', 'crocs', 'deckers',
+        
+        # Automotive
+        'ford', 'general motors', 'gm', 'stellantis', 'rivian', 'lucid',
+        'nikola', 'fisker', 'lordstown', 'goodyear', 'lear', 'aptiv',
+        
+        # Energy
+        'exxon', 'exxonmobil', 'chevron', 'conocophillips', 'occidental',
+        'marathon', 'valero', 'phillips 66', 'schlumberger', 'halliburton',
+        'baker hughes', 'devon energy', 'pioneer', 'diamondback',
+        
+        # Aerospace & Defense
+        'boeing', 'lockheed martin', 'raytheon', 'northrop grumman',
+        'general dynamics', 'l3harris', 'textron', 'huntington ingalls',
+        
+        # Pharma & Biotech
+        'pfizer', 'johnson', 'johnson & johnson', 'merck', 'abbvie', 'bristol',
+        'bristol myers', 'eli lilly', 'lilly', 'amgen', 'gilead',
+        'regeneron', 'vertex', 'biogen', 'moderna', 'biontech',
+        'illumina', 'seagen', 'biomarin', 'incyte', 'alexion',
+        
+        # Medical Devices
+        'medtronic', 'abbott', 'dexcom', 'intuitive surgical', 'stryker',
+        'boston scientific', 'edwards lifesciences', 'zimmer biomet',
+        'baxter', 'becton dickinson', 'bd', 'align technology',
+        
+        # Healthcare Services
+        'unitedhealth', 'cvs', 'cigna', 'humana', 'elevance',
+        'anthem', 'centene', 'quest diagnostics', 'labcorp',
+        
+        # Banks & Financial Services
+        'jpmorgan', 'bank of america', 'wells fargo', 'citigroup',
+        'goldman sachs', 'morgan stanley', 'charles schwab', 'blackrock',
+        'capital one', 'pnc', 'us bancorp', 'truist', 'citizens',
+        
+        # Insurance
+        'berkshire hathaway', 'progressive', 'allstate', 'travelers',
+        'chubb', 'metlife', 'prudential', 'aflac', 'lincoln national',
+        
+        # Real Estate
+        'american tower', 'prologis', 'crown castle', 'equinix',
+        'public storage', 'realty income', 'simon property', 'welltower',
+        
+        # Industrial & Manufacturing
+        'caterpillar', 'deere', 'john deere', '3m', 'honeywell',
+        'ge', 'general electric', 'emerson', 'parker hannifin',
+        'eaton', 'rockwell', 'illinois tool', 'stanley black',
+        
+        # Transportation & Logistics
+        'ups', 'fedex', 'union pacific', 'norfolk southern', 'csx',
+        'jb hunt', 'old dominion', 'schneider', 'landstar', 'xpo',
+        
+        # Materials & Chemicals
+        'dow', 'dupont', 'linde', 'air products', 'sherwin williams',
+        'ppg', 'nucor', 'freeport', 'newmont', 'mosaic',
+        
+        # Utilities
+        'nextera', 'duke energy', 'southern company', 'dominion',
+        'american electric', 'exelon', 'sempra', 'peg', 'xcel energy',
+        
+        # Telecom
+        'verizon', 'att', 't-mobile', 'lumen', 'frontier'
+    ]
+    
+    # Check per match esatti o parziali
+    for company in italian_companies:
+        if company in query_lower:
+            return 'IT'
+    
+    for company in english_companies:
+        if company in query_lower:
+            return 'US'
+    
+    # Se non trova match, usa caratteristiche linguistiche
+    
+    # Caratteristiche tipiche italiane
+    italian_chars = ['à', 'è', 'é', 'ì', 'ò', 'ù']
+    if any(char in query_lower for char in italian_chars):
+        return 'IT'
+    
+    # Parole chiave italiane comuni
+    italian_keywords = ['spa', 's.p.a', 'srl', 'banca', 'gruppo']
+    if any(keyword in query_lower for keyword in italian_keywords):
+        return 'IT'
+    
+    # Se il ticker già specifica .MI o .BIT, è italiano
+    if '.mi' in query_lower or '.bit' in query_lower:
+        return 'IT'
+    
+    # Parole inglesi comuni nei nomi aziende USA
+    english_keywords = ['corp', 'inc', 'ltd', 'technologies', 'systems', 'group']
+    if any(keyword in query_lower for keyword in english_keywords):
+        return 'US'
+    
+    # Default: se non siamo sicuri, usiamo inglese (più comune globalmente)
+    return 'US'
 
-with col1:
-    ticker = st.text_input(
-        "Ticker",
-        value="AAPL",
-        help="Inserisci il ticker del titolo (es. AAPL, MSFT, ISP.MI, MC.PA, SAP.DE)"
-    ).upper()
+@st.cache_data(ttl=3600)
+def search_ticker_by_name(query, api_key, user_country=None):
+    """
+    Cerca ticker da nome azienda con priorità geografica automatica
+    
+    Args:
+        query: Nome azienda o ticker
+        api_key: Chiave API FMP
+        user_country: Se None, rileva automaticamente dalla query
+    """
+    # Se sembra già un ticker completo, restituiscilo
+    if query.isupper() and len(query) <= 6 and '.' not in query:
+        return query
+    
+    if '.' in query and query.replace('.', '').replace('-', '').isalnum():
+        return query.upper()
+    
+    # RILEVAMENTO AUTOMATICO PAESE se non specificato
+    if user_country is None:
+        user_country = detect_query_language(query)
+    
+    # Cerca via API
+    url = f"https://financialmodelingprep.com/api/v3/search?query={query}&limit=25&apikey={api_key}"
+    
+    try:
+        response = requests.get(url, timeout=10)
+        response.raise_for_status()
+        results = response.json()
+        
+        if not results or len(results) == 0:
+            return None
+        
+        query_lower = query.lower().strip()
+        
+        # Mercati per paese
+        country_exchanges = {
+            'IT': ['MIL', 'BIT'],           # Italia
+            'US': ['NYSE', 'NASDAQ'],       # USA
+            'FR': ['PAR'],                  # Francia
+            'DE': ['XETRA', 'F'],          # Germania
+            'GB': ['LSE'],                  # Regno Unito
+        }
+        
+        preferred_exchanges = country_exchanges.get(user_country, ['NYSE', 'NASDAQ'])
+        main_exchanges = ['NASDAQ', 'NYSE', 'MIL', 'BIT', 'XETRA', 'PAR', 'LSE', 'F']
+        
+        # PRIORITÀ 0: Match esatto ticker + mercato domestico
+        for result in results:
+            ticker = result.get('symbol', '')
+            exchange = result.get('exchangeShortName', '')
+            ticker_base = ticker.split('.')[0]
+            
+            if ticker_base.upper() == query_lower.upper() and exchange in preferred_exchanges:
+                return ticker
+        
+        # PRIORITÀ 1: Match esatto ticker + mercati principali
+        for result in results:
+            ticker = result.get('symbol', '')
+            exchange = result.get('exchangeShortName', '')
+            ticker_base = ticker.split('.')[0]
+            
+            if ticker_base.upper() == query_lower.upper() and exchange in main_exchanges:
+                return ticker
+        
+        # PRIORITÀ 2: Match esatto nome + mercato domestico
+        for result in results:
+            name = result.get('name', '').lower()
+            exchange = result.get('exchangeShortName', '')
+            
+            if query_lower == name and exchange in preferred_exchanges:
+                return result.get('symbol')
+        
+        # PRIORITÀ 3: Match esatto nome
+        for result in results:
+            name = result.get('name', '').lower()
+            if query_lower == name:
+                return result.get('symbol')
+        
+        # PRIORITÀ 4: Nome inizia con query + mercato domestico
+        for result in results:
+            name = result.get('name', '').lower()
+            exchange = result.get('exchangeShortName', '')
+            
+            if name.startswith(query_lower) and exchange in preferred_exchanges:
+                return result.get('symbol')
+        
+        # PRIORITÀ 5: Nome inizia con query
+        for result in results:
+            name = result.get('name', '').lower()
+            if name.startswith(query_lower):
+                return result.get('symbol')
+        
+        # PRIORITÀ 6: Ticker inizia + mercato domestico
+        for result in results:
+            ticker = result.get('symbol', '').upper()
+            exchange = result.get('exchangeShortName', '')
+            ticker_base = ticker.split('.')[0]
+            
+            if ticker_base.startswith(query_lower.upper()) and exchange in preferred_exchanges:
+                return result.get('symbol')
+        
+        # PRIORITÀ 7: Ticker inizia + mercati principali
+        for result in results:
+            ticker = result.get('symbol', '').upper()
+            exchange = result.get('exchangeShortName', '')
+            ticker_base = ticker.split('.')[0]
+            
+            if ticker_base.startswith(query_lower.upper()) and exchange in main_exchanges:
+                return result.get('symbol')
+        
+        # PRIORITÀ 8: Nome contiene + mercato domestico
+        for result in results:
+            name = result.get('name', '').lower()
+            exchange = result.get('exchangeShortName', '')
+            
+            if query_lower in name and exchange in preferred_exchanges:
+                return result.get('symbol')
+        
+        # PRIORITÀ 9: Primo da mercato domestico
+        for result in results:
+            exchange = result.get('exchangeShortName', '')
+            if exchange in preferred_exchanges:
+                return result.get('symbol')
+        
+        # PRIORITÀ 10: Primo da mercati principali
+        for result in results:
+            exchange = result.get('exchangeShortName', '')
+            if exchange in main_exchanges:
+                return result.get('symbol')
+        
+        # FALLBACK
+        return results[0].get('symbol')
+            
+    except Exception as e:
+        st.warning(f"Errore nella ricerca del ticker: {str(e)}")
+        return None
 
-with col2:
-    period = st.selectbox(
-        "Periodo",
-        ["annuale", "quarter"],
-        help="Dati annuali o trimestrali"
-    )
+def display_search_suggestions(query, api_key, max_results=5, user_country=None):
+    """
+    Mostra suggerimenti ordinati per rilevanza geografica automatica
+    """
+    # RILEVAMENTO AUTOMATICO PAESE se non specificato
+    if user_country is None:
+        user_country = detect_query_language(query)
+    
+    url = f"https://financialmodelingprep.com/api/v3/search?query={query}&limit=25&apikey={api_key}"
+    
+    try:
+        response = requests.get(url, timeout=10)
+        response.raise_for_status()
+        results = response.json()
+        
+        if not results or len(results) == 0:
+            return []
+        
+        # Mercati per paese
+        country_exchanges = {
+            'IT': ['MIL', 'BIT'],
+            'US': ['NYSE', 'NASDAQ'],
+            'FR': ['PAR'],
+            'DE': ['XETRA', 'F'],
+            'GB': ['LSE']
+        }
+        
+        preferred_exchanges = country_exchanges.get(user_country, ['NYSE', 'NASDAQ'])
+        main_exchanges = ['NASDAQ', 'NYSE', 'MIL', 'BIT', 'XETRA', 'PAR', 'LSE', 'F']
+        query_lower = query.lower().strip()
+        
+        filtered_results = []
+        
+        for result in results:
+            symbol = result.get('symbol', 'N/A')
+            name = result.get('name', 'N/A')
+            exchange = result.get('exchangeShortName', '')
+            
+            if exchange not in main_exchanges:
+                continue
+            
+            # Calcola score
+            score = 0
+            name_lower = name.lower()
+            ticker_base = symbol.split('.')[0].lower()
+            
+            # Match esatto ticker
+            if ticker_base == query_lower:
+                score += 1000
+            elif name_lower == query_lower:
+                score += 900
+            elif ticker_base.startswith(query_lower):
+                score += 800
+            elif name_lower.startswith(query_lower):
+                score += 700
+            elif query_lower in name_lower:
+                score += 500
+            else:
+                score += 100
+            
+            # BONUS GEOGRAFICO
+            if exchange in preferred_exchanges:
+                score += 500
+            
+            # Bonus altri mercati
+            exchange_priority = {
+                'NYSE': 100, 
+                'NASDAQ': 100,
+                'MIL': 90,
+                'BIT': 90,
+                'XETRA': 80,
+                'F': 80,
+                'PAR': 80,
+                'LSE': 80
+            }
+            
+            if exchange not in preferred_exchanges:
+                score += exchange_priority.get(exchange, 0)
+            
+            filtered_results.append({
+                'symbol': symbol,
+                'name': name,
+                'exchange': exchange,
+                'score': score,
+                'is_domestic': exchange in preferred_exchanges
+            })
+        
+        # Ordina per score
+        filtered_results.sort(key=lambda x: x['score'], reverse=True)
+        
+        if filtered_results:
+            # Mostra messaggio con mercato rilevato
+            market_emoji = {
+                'IT': '🇮🇹 Italia',
+                'US': '🇺🇸 USA',
+                'FR': '🇫🇷 Francia',
+                'DE': '🇩🇪 Germania',
+                'GB': '🇬🇧 UK'
+            }
+            market_label = market_emoji.get(user_country, user_country)
+            
+            st.info(f"🔍 **Risultati per '{query}'** (mercato prioritario: {market_label})")
+            
+            # Emoji bandiera per mercato rilevato
+            flag_emoji = {
+                'IT': '🇮🇹',
+                'US': '🇺🇸',
+                'FR': '🇫🇷',
+                'DE': '🇩🇪',
+                'GB': '🇬🇧'
+            }
+            
+            for idx, result in enumerate(filtered_results[:max_results], 1):
+                if result['is_domestic']:
+                    flag = flag_emoji.get(user_country, '')
+                    prefix = f"⭐{flag}"
+                elif idx == 1:
+                    prefix = "⭐"
+                else:
+                    prefix = f"{idx}."
+                
+                st.markdown(f"{prefix} **{result['symbol']}** - {result['name']} *({result['exchange']})*")
+            
+            return [r['symbol'] for r in filtered_results[:max_results]]
+        else:
+            return []
+            
+    except Exception as e:
+        st.error(f"Errore nel recupero suggerimenti: {str(e)}")
+        return []
 
-with col3:
-    limit = st.slider(
-        "Numero di periodi",
-        min_value=5,
-        max_value=20,
-        value=10,
-        help="Quanti periodi visualizzare"
-    )
+# ============================================
+# PARTE 2: FUNZIONI PER RECUPERARE I DATI E UTILITY
+# ============================================
 
-with col4:
-    st.write("")  # Spacer
-    st.write("")  # Spacer
-    if st.button("🔍 Analizza", type="primary", use_container_width=True):
-        st.session_state.analyzed = True
-        st.session_state.current_ticker = ticker
-        st.session_state.current_period = period
-        st.session_state.current_limit = limit
-
-# API Key configuration (hidden if configured in code)
-if not FMP_API_KEY:
-    st.markdown("---")
-    api_key = st.text_input(
-        "API Key FMP",
-        type="password",
-        help="Ottieni la tua API key gratuita su financialmodelingprep.com"
-    )
-else:
-    api_key = FMP_API_KEY
-
-st.markdown("---")
-
-# Funzioni per recuperare i dati
 @st.cache_data(ttl=3600)
 def fetch_data(ticker, api_key, endpoint, period="annual", limit=10):
     """Recupera dati dall'API FMP"""
@@ -186,15 +618,19 @@ def fetch_quote(ticker, api_key):
         return None
 
 @st.cache_data(ttl=3600)
-def fetch_historical_prices(ticker, api_key):
-    """Recupera i prezzi storici dell'ultimo anno"""
-    url = f"https://financialmodelingprep.com/api/v3/historical-price-full/{ticker}?apikey={api_key}"
+def fetch_historical_prices(ticker, api_key, days=365):
+    """Recupera i prezzi storici degli ultimi N giorni"""
+    # Calcola la data di inizio (N giorni fa)
+    end_date = datetime.now()
+    start_date = end_date - timedelta(days=days)
+    
+    url = f"https://financialmodelingprep.com/api/v3/historical-price-full/{ticker}?from={start_date.strftime('%Y-%m-%d')}&to={end_date.strftime('%Y-%m-%d')}&apikey={api_key}"
     try:
         response = requests.get(url, timeout=10)
         response.raise_for_status()
         data = response.json()
         if 'historical' in data:
-            return data['historical'][:365]
+            return data['historical']
         return []
     except Exception as e:
         st.error(f"Errore nel recupero prezzi storici: {str(e)}")
@@ -239,6 +675,19 @@ def fetch_dividends_calendar(ticker, api_key):
         return []
     except Exception as e:
         st.error(f"Errore nel recupero dividendi: {str(e)}")
+        return []
+
+@st.cache_data(ttl=3600)
+def fetch_analyst_ratings(ticker, api_key):
+    """Recupera i rating degli analisti (Buy, Hold, Sell)"""
+    url = f"https://financialmodelingprep.com/api/v3/grade/{ticker}?limit=50&apikey={api_key}"
+    try:
+        response = requests.get(url, timeout=10)
+        response.raise_for_status()
+        data = response.json()
+        return data if isinstance(data, list) else []
+    except Exception as e:
+        st.error(f"Errore nel recupero rating analisti: {str(e)}")
         return []
 
 def format_currency(value, currency="USD"):
@@ -420,22 +869,120 @@ def create_mini_price_chart(historical_data, currency="USD"):
     
     return fig, change_pct
 
-# Main logic
+# ============================================
+# PARTE 3: INTERFACCIA UTENTE E INPUT
+# ============================================
+
+# Titolo applicazione
+st.title("Analisi Finanziaria Titoli Azionari")
+st.markdown("---")
+
+# Input controls sotto il titolo
+col1, col2, col3, col4 = st.columns([2, 2, 2, 2])
+
+with col1:
+    ticker_input = st.text_input(
+        "Ticker o Nome Azienda",
+        value="AAPL",
+        help="Inserisci il ticker (es. AAPL, MSFT, ISP.MI) o il nome dell'azienda (es. Apple, Intesa Sanpaolo)"
+    )
+
+with col2:
+    period = st.selectbox(
+        "Periodo",
+        ["annuale", "quarter"],
+        help="Dati annuali o trimestrali"
+    )
+
+with col3:
+    limit = st.slider(
+        "Numero di periodi",
+        min_value=5,
+        max_value=20,
+        value=10,
+        help="Quanti periodi visualizzare"
+    )
+
+with col4:
+    st.write("")  # Spacer
+    st.write("")  # Spacer
+    if st.button("🔍 Analizza", type="primary", use_container_width=True):
+        st.session_state.analyzed = True
+        st.session_state.current_ticker = ticker_input
+        st.session_state.current_period = period
+        st.session_state.current_limit = limit
+
+# API Key configuration (hidden if configured in code)
+if not FMP_API_KEY:
+    st.markdown("---")
+    api_key = st.text_input(
+        "API Key FMP",
+        type="password",
+        help="Ottieni la tua API key gratuita su financialmodelingprep.com"
+    )
+else:
+    api_key = FMP_API_KEY
+
+st.markdown("---")
+
+# ============================================
+# MAIN LOGIC
+# ============================================
+
 if st.session_state.analyzed:
     # Usa i valori salvati nel session state
-    ticker = st.session_state.current_ticker
+    ticker_input = st.session_state.current_ticker
     period = st.session_state.current_period
     limit = st.session_state.current_limit
     
     if not api_key:
         st.error("⚠️ Inserisci la tua API Key FMP o configurala nel codice")
-    elif not ticker:
+    elif not ticker_input:
         st.error("⚠️ Inserisci un ticker valido")
     else:
-        with st.spinner(f"Recupero dati per {ticker}..."):
+        # ============================================
+        # RICERCA TICKER DA NOME
+        # ============================================
+        
+        # Determina se l'input è un ticker completo (con exchange) o solo un nome/simbolo
+        ticker = ticker_input.upper()
+        needs_search = False
+        
+        # Se NON contiene il punto (exchange), fai sempre la ricerca
+        # Es: "ENEL" → cerca, "ENEL.MI" → usa direttamente
+        if '.' not in ticker:
+            needs_search = True
+        # Se contiene caratteri non validi per un ticker, cerca
+        elif not ticker.replace('.', '').replace('-', '').isalnum():
+            needs_search = True
+        # Se è troppo lungo per essere un ticker, cerca
+        elif len(ticker) > 10:
+            needs_search = True
+        
+        if needs_search:
+            with st.spinner(f"🔍 Ricerca ticker per '{ticker_input}'..."):
+                found_ticker = search_ticker_by_name(ticker_input, api_key)
+                
+                if found_ticker:
+                    ticker = found_ticker
+                    st.success(f"✅ Trovato ticker: **{ticker}**")
+                    
+                    # Mostra anche suggerimenti alternativi  
+                    with st.expander(" Altri risultati trovati"):
+                        suggestions = display_search_suggestions(ticker_input, api_key, max_results=5)
+                else:
+                    st.error(f"❌ Nessun ticker trovato per '{ticker_input}'")
+                    
+                    # Prova a mostrare suggerimenti anche in caso di errore
+                    st.info("💡 Prova con questi suggerimenti:")
+                    suggestions = display_search_suggestions(ticker_input, api_key, max_results=5)
+                    
+                    st.stop()
+        
+        with st.spinner(f" Recupero dati per {ticker}..."):
             company_profile = fetch_company_profile(ticker, api_key)
             quote = fetch_quote(ticker, api_key)
-            historical_prices = fetch_historical_prices(ticker, api_key)
+            historical_prices = fetch_historical_prices(ticker, api_key, days=365)
             
             income_data = fetch_data(ticker, api_key, "income-statement", period, limit)
             balance_data = fetch_data(ticker, api_key, "balance-sheet-statement", period, limit)
@@ -448,6 +995,7 @@ if st.session_state.analyzed:
             news_data = fetch_company_news(ticker, api_key, limit=20)
             earnings_calendar = fetch_earnings_calendar(ticker, api_key)
             dividends_data = fetch_dividends_calendar(ticker, api_key)
+            analyst_ratings = fetch_analyst_ratings(ticker, api_key)
             
             if not income_data:
                 st.error("❌ Nessun dato trovato. Verifica il ticker e la tua API key.")
@@ -457,6 +1005,9 @@ if st.session_state.analyzed:
                     exchange = company_profile.get('exchangeShortName', 'NASDAQ')
                     currency = get_currency_from_exchange(exchange)
                 
+                # ============================================
+                # HEADER CON INFO PRINCIPALI
+                # ============================================
                 if company_profile and quote:
                     st.markdown("---")
                     
@@ -500,6 +1051,8 @@ if st.session_state.analyzed:
                 st.markdown("---")
                 st.success(f"✅ Dati caricati con successo per {ticker}")
                 
+                # Nota: Le TAB verranno aggiunte nella PARTE 4
+                # Qui definiamo la struttura delle tab
                 tab1, tab2, tab3, tab4, tab5, tab6, tab7, tab8, tab9, tab10 = st.tabs([
                     "**Conto Economico**",
                     "**Stato Patrimoniale**", 
@@ -512,7 +1065,8 @@ if st.session_state.analyzed:
                     "**News**",
                     "**Calendario**"
                 ])
-                
+
+
                 # TAB 1: Conto Economico
                 with tab1:
                     st.header("Conto Economico")
@@ -1153,7 +1707,7 @@ if st.session_state.analyzed:
                                     st.warning("⚠️ Il tasso di sconto deve essere maggiore della crescita dei dividendi")
                             
                             with col2:
-                                st.markdown("**📝 Formula Gordon Growth Model**")
+                                st.markdown("** Formula Gordon Growth Model**")
                                 st.latex(r"V_0 = \frac{D_1}{r - g}")
                                 st.markdown("""
                                 Dove:
@@ -1476,7 +2030,7 @@ if st.session_state.analyzed:
                                          delta_color="normal")
                             
                             with col2:
-                                st.markdown("**📝 Formule di Graham**")
+                                st.markdown("** Formule di Graham**")
                                 
                                 st.markdown("**Formula Base:**")
                                 st.latex(r"V = \sqrt{22.5 \times EPS \times BVPS}")
@@ -1682,16 +2236,120 @@ if st.session_state.analyzed:
                     
                     else:
                         st.warning("⚠️ Dati insufficienti per la valutazione")
-                
                 # TAB 6: Stime Analisti
                 with tab6:
                     st.header("Stime degli Analisti")
                     
+                    # === SEZIONE RATING ANALISTI ===
+                    if analyst_ratings and len(analyst_ratings) > 0:
+                        st.subheader("Rating Analisti")
+                        
+                        # Conta i rating più recenti (ultimi 12 mesi)
+                        df_ratings = pd.DataFrame(analyst_ratings)
+                        df_ratings['date'] = pd.to_datetime(df_ratings['date'])
+                        
+                        # Filtra ultimi 12 mesi
+                        one_year_ago = datetime.now() - timedelta(days=365)
+                        recent_ratings = df_ratings[df_ratings['date'] >= one_year_ago]
+                        
+                        if len(recent_ratings) > 0:
+                            # Normalizza i rating (possono avere diverse nomenclature)
+                            def normalize_rating(rating_str):
+                                rating_lower = str(rating_str).lower()
+                                if any(word in rating_lower for word in ['buy', 'strong buy', 'outperform', 'overweight']):
+                                    return 'Buy'
+                                elif any(word in rating_lower for word in ['sell', 'strong sell', 'underperform', 'underweight']):
+                                    return 'Sell'
+                                elif any(word in rating_lower for word in ['hold', 'neutral', 'equal weight', 'market perform']):
+                                    return 'Hold'
+                                else:
+                                    return 'Other'
+                            
+                            recent_ratings['normalized_rating'] = recent_ratings.apply(
+                                lambda row: normalize_rating(row.get('newGrade', row.get('gradingCompany', ''))), 
+                                axis=1
+                            )
+                            
+                            # Conta rating
+                            rating_counts = recent_ratings['normalized_rating'].value_counts()
+                            
+                            buy_count = rating_counts.get('Buy', 0)
+                            hold_count = rating_counts.get('Hold', 0)
+                            sell_count = rating_counts.get('Sell', 0)
+                            total_ratings = buy_count + hold_count + sell_count
+                            
+                            if total_ratings > 0:
+                                col1, col2, col3, col4 = st.columns(4)
+                                
+                                with col1:
+                                    st.metric("🟢 Buy", buy_count, delta=f"{(buy_count/total_ratings)*100:.1f}%")
+                                with col2:
+                                    st.metric("🟡 Hold", hold_count, delta=f"{(hold_count/total_ratings)*100:.1f}%")
+                                with col3:
+                                    st.metric("🔴 Sell", sell_count, delta=f"{(sell_count/total_ratings)*100:.1f}%")
+                                with col4:
+                                    st.metric("Totale Rating", total_ratings)
+                                
+                                # Grafico a torta dei rating
+                                fig_ratings = go.Figure(data=[go.Pie(
+                                    labels=['Buy', 'Hold', 'Sell'],
+                                    values=[buy_count, hold_count, sell_count],
+                                    marker=dict(colors=['#00C853', '#FFD600', '#FF3B30']),
+                                    hole=0.4
+                                )])
+                                
+                                fig_ratings.update_layout(
+                                    title="Distribuzione Rating Analisti (Ultimi 12 Mesi)",
+                                    template='plotly_white',
+                                    height=350
+                                )
+                                
+                                st.plotly_chart(fig_ratings, use_container_width=True)
+                                
+                                # Consenso
+                                st.markdown("**Consenso degli Analisti:**")
+                                if buy_count > hold_count + sell_count:
+                                    st.success("### 🟢 FORTE CONSENSO BUY")
+                                elif buy_count > hold_count and buy_count > sell_count:
+                                    st.success("### 🟢 CONSENSO BUY")
+                                elif hold_count > buy_count and hold_count > sell_count:
+                                    st.info("### 🟡 CONSENSO HOLD")
+                                elif sell_count > buy_count and sell_count > hold_count:
+                                    st.error("### 🔴 CONSENSO SELL")
+                                else:
+                                    st.warning("### ⚖️ CONSENSO MISTO")
+                                
+                                st.markdown("---")
+                                
+                                # Tabella dettagliata rating recenti
+                                st.subheader("Ultimi Rating")
+                                display_ratings = recent_ratings.head(10).copy()
+                                display_ratings['Data'] = display_ratings['date'].dt.strftime('%Y-%m-%d')
+                                display_ratings['Analista'] = display_ratings['gradingCompany']
+                                display_ratings['Rating'] = display_ratings.apply(
+                                    lambda row: f"🟢 {row.get('newGrade', 'N/A')}" if row['normalized_rating'] == 'Buy' 
+                                    else (f"🟡 {row.get('newGrade', 'N/A')}" if row['normalized_rating'] == 'Hold' 
+                                    else f"🔴 {row.get('newGrade', 'N/A')}"), 
+                                    axis=1
+                                )
+                                
+                                display_df_ratings = display_ratings[['Data', 'Analista', 'Rating']].reset_index(drop=True)
+                                st.dataframe(display_df_ratings, use_container_width=True, hide_index=True)
+                            else:
+                                st.info("Nessun rating Buy/Hold/Sell trovato negli ultimi 12 mesi")
+                        else:
+                            st.info("Nessun rating recente disponibile")
+                    else:
+                        st.info("Nessun rating analisti disponibile per questo titolo")
+                    
+                    st.markdown("---")
+                    
+                    # === SEZIONE STIME (ORIGINALE) ===
                     if estimates_data:
+                        st.subheader("Stime Finanziarie")
                         df_estimates = pd.DataFrame(estimates_data)
                         df_estimates['year'] = pd.to_datetime(df_estimates['date']).dt.year.astype(str)
                         
-                        st.subheader("Dati Dettagliati")
                         display_df = pd.DataFrame({
                             'Anno': df_estimates['year'],
                             'Stima Ricavi': df_estimates['estimatedRevenueAvg'].apply(lambda x: format_currency(x, currency)),
@@ -1703,8 +2361,7 @@ if st.session_state.analyzed:
                         st.dataframe(display_df, use_container_width=True, hide_index=True)
                     else:
                         st.info("Nessuna stima disponibile per questo titolo")
-                
-                # TAB 7: Insider Trading
+# TAB 7: Insider Trading
                 with tab7:
                     st.header("Insider Trading")
                     
@@ -1853,7 +2510,7 @@ if st.session_state.analyzed:
                                 st.markdown(f"**CIK:** {cik}")
                         
                         st.markdown("---")
-                        st.subheader("📝 Descrizione")
+                        st.subheader("Descrizione")
                         description = company_profile.get('description', '')
                         if description:
                             st.write(description)
@@ -1963,7 +2620,7 @@ if st.session_state.analyzed:
                             st.dataframe(display_df, use_container_width=True, hide_index=True)
                         else:
                             st.warning("⚠️ Nessun dato earnings disponibile")
-                            st.info("💡 Possibili cause:\n- Il piano API gratuito potrebbe avere limitazioni\n- Il ticker potrebbe non avere storico earnings\n- Prova con un ticker più grande (es. AAPL, MSFT)")
+                            st.info(" Possibili cause:\n- Il piano API gratuito potrebbe avere limitazioni\n- Il ticker potrebbe non avere storico earnings\n- Prova con un ticker più grande (es. AAPL, MSFT)")
                     
                     with col2:
                         st.subheader("Storico Dividendi")
@@ -2045,12 +2702,14 @@ else:
     st.markdown("""
     ### Come iniziare
     
-    1. **Seleziona un ticker** (es: AAPL, MSFT, ISP.MI, MC.PA, SAP.DE)
+    1. **Seleziona un ticker** (es: AAPL, MSFT, ISP.MI, MC.PA, SAP.DE) **oppure il nome dell'azienda** (es: Apple, Intesa Sanpaolo)
     2. **Scegli periodo e numero di periodi** da analizzare
     3. **Clicca su Analizza** per visualizzare tutti i dati finanziari
     
     ### Funzionalità Principali
+    - ✅ **Ricerca intelligente per nome** con priorità geografica (Italia, USA, Europa)
     - ✅ Valutazione Azione intelligente tramite DCF, DDM ecc.
+    - ✅ **Rating degli Analisti** (Buy, Hold, Sell)
     - ✅ Grafici interattivi personalizzabili
     - ✅ Analisi storica fino a 20 periodi
     - ✅ Dati trimestrali e annuali
@@ -2066,13 +2725,17 @@ else:
     ### Suggerimenti
     
     **Titoli popolari da provare:**
-    - 🇺🇸 USA: AAPL, MSFT, GOOGL, AMZN, TSLA, NVDA
-    - 🇪🇺 Europa: SAP.DE, ASML.AS, MC.PA, OR.PA
-    - 🇮🇹 Italia: ENI.MI, ISP.MI, UCG.MI, RACE.MI
+    - 🇺🇸 USA: AAPL, MSFT, GOOGL, AMZN, TSLA, NVDA, 
+    - 🇪🇺 Europa: SAP.DE, ASML.AS, MC.PA, OR.PA, 
+    - 🇮🇹 Italia: ENI.MI, ISP.MI, UCG.MI, RACE.MI 
+    
+    **Oppure cerca per nome:**
+    - Apple, Microsoft, Intesa Sanpaolo, Unicredit, Ferrari
     
     ### Note Importanti
     
     - I grafici sono completamente interattivi e personalizzabili
+    - La ricerca per nome utilizza priorità geografica automatica
     """)
 
 # Footer
