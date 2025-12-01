@@ -874,7 +874,7 @@ def create_mini_price_chart(historical_data, currency="USD"):
 # ============================================
 
 # Titolo applicazione
-st.title("Analisi Finanziaria Titoli Azionari")
+st.title("Analisi Finanziaria Avanzata Titoli Azionari")
 st.markdown("---")
 
 # Input controls sotto il titolo
