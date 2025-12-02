@@ -1589,219 +1589,105 @@ if st.session_state.analyzed:
                         
                         st.markdown("---")
                         
-                        # === CALCOLI ===
+                        # === CALCOLI PRELIMINARI PER TUTTI I MODELLI ===
                         
-                        # 1. DCF Model (Discounted Cash Flow)
-                        st.subheader("1. DCF - Discounted Cash Flow")
+                        # Variabili per raccogliere i valori intrinseci
+                        valuations = []
                         
+                        # 1. DCF Model
                         fcf_current = safe_get(latest_cashflow, 'freeCashFlow', 0)
+                        intrinsic_value_dcf = 0
                         
                         if fcf_current > 0:
-                            col1, col2 = st.columns(2)
+                            fcf_projections = []
+                            for year in range(1, projection_years + 1):
+                                fcf_projected = fcf_current * ((1 + fcf_growth) ** year)
+                                pv = fcf_projected / ((1 + discount_rate) ** year)
+                                fcf_projections.append({
+                                    'Anno': year,
+                                    'FCF Proiettato': fcf_projected,
+                                    'Valore Attuale': pv
+                                })
                             
-                            with col1:
-                                # Proiezioni FCF
-                                fcf_projections = []
-                                for year in range(1, projection_years + 1):
-                                    fcf_projected = fcf_current * ((1 + fcf_growth) ** year)
-                                    pv = fcf_projected / ((1 + discount_rate) ** year)
-                                    fcf_projections.append({
-                                        'Anno': year,
-                                        'FCF Proiettato': fcf_projected,
-                                        'Valore Attuale': pv
-                                    })
-                                
-                                df_fcf = pd.DataFrame(fcf_projections)
-                                
-                                # Terminal Value
-                                fcf_terminal_year = fcf_current * ((1 + fcf_growth) ** projection_years)
-                                terminal_value = (fcf_terminal_year * (1 + terminal_growth)) / (discount_rate - terminal_growth)
-                                terminal_value_pv = terminal_value / ((1 + discount_rate) ** projection_years)
-                                
-                                # Enterprise Value
-                                pv_fcf_sum = df_fcf['Valore Attuale'].sum()
-                                enterprise_value = pv_fcf_sum + terminal_value_pv
-                                
-                                # Equity Value
-                                cash = safe_get(latest_balance, 'cashAndCashEquivalents', 0)
-                                total_debt = safe_get(latest_balance, 'totalDebt', 0)
-                                equity_value = enterprise_value + cash - total_debt
-                                
-                                # Shares e Valore per Azione
-                                shares = safe_get(latest_income, 'weightedAverageShsOutDil', 0)
-                                if shares == 0:
-                                    shares = safe_get(latest_income, 'weightedAverageShsOut', 0)
-                                
-                                intrinsic_value_dcf = equity_value / shares if shares > 0 else 0
-                                
-                                # Metriche
-                                st.metric("FCF Corrente", format_currency(fcf_current, currency))
-                                st.metric("Enterprise Value", format_currency(enterprise_value, currency))
-                                st.metric("Equity Value", format_currency(equity_value, currency))
-                                st.metric("Valore Intrinseco DCF", f"{get_currency_symbol(currency)}{intrinsic_value_dcf:.2f}")
-                                
-                                if intrinsic_value_dcf > 0:
-                                    upside_dcf = ((intrinsic_value_dcf - current_price) / current_price) * 100
-                                    st.metric("Upside/Downside", f"{upside_dcf:+.1f}%", 
-                                             delta=f"{upside_dcf:+.1f}%",
-                                             delta_color="normal")
+                            df_fcf = pd.DataFrame(fcf_projections)
                             
-                            with col2:
-                                st.markdown("**Proiezioni Free Cash Flow**")
-                                
-                                # Mostra tabella proiezioni
-                                display_fcf = df_fcf.copy()
-                                display_fcf['FCF Proiettato'] = display_fcf['FCF Proiettato'].apply(lambda x: format_currency(x, currency))
-                                display_fcf['Valore Attuale'] = display_fcf['Valore Attuale'].apply(lambda x: format_currency(x, currency))
-                                st.dataframe(display_fcf, use_container_width=True, hide_index=True)
-                                
-                                st.markdown(f"**Terminal Value:** {format_currency(terminal_value, currency)}")
-                                st.markdown(f"**Terminal Value (PV):** {format_currency(terminal_value_pv, currency)}")
-                                st.markdown(f"**Somma VP FCF:** {format_currency(pv_fcf_sum, currency)}")
-                        else:
-                            st.warning("⚠️ Free Cash Flow non disponibile o negativo per il DCF")
+                            fcf_terminal_year = fcf_current * ((1 + fcf_growth) ** projection_years)
+                            terminal_value = (fcf_terminal_year * (1 + terminal_growth)) / (discount_rate - terminal_growth)
+                            terminal_value_pv = terminal_value / ((1 + discount_rate) ** projection_years)
+                            
+                            pv_fcf_sum = df_fcf['Valore Attuale'].sum()
+                            enterprise_value = pv_fcf_sum + terminal_value_pv
+                            
+                            cash = safe_get(latest_balance, 'cashAndCashEquivalents', 0)
+                            total_debt = safe_get(latest_balance, 'totalDebt', 0)
+                            equity_value = enterprise_value + cash - total_debt
+                            
+                            shares = safe_get(latest_income, 'weightedAverageShsOutDil', 0)
+                            if shares == 0:
+                                shares = safe_get(latest_income, 'weightedAverageShsOut', 0)
+                            
+                            intrinsic_value_dcf = equity_value / shares if shares > 0 else 0
+                            
+                            if intrinsic_value_dcf > 0:
+                                valuations.append({
+                                    'Modello': 'DCF (Discounted Cash Flow)',
+                                    'Valore Intrinseco': intrinsic_value_dcf,
+                                    'Upside/Downside': ((intrinsic_value_dcf - current_price) / current_price) * 100
+                                })
                         
-                        st.markdown("---")
-                        
-                        # 2. DDM Model (Dividend Discount Model)
-                        st.subheader("2. DDM - Dividend Discount Model (Gordon Growth)")
-                        
-                        # Recupera dividendi
+                        # 2. DDM Model
                         dividend_per_share = safe_get(latest_income, 'eps', 0) * safe_get(ratios_data[0] if ratios_data else {}, 'payoutRatio', 0)
+                        intrinsic_value_ddm = 0
                         
                         if dividend_per_share > 0:
-                            col1, col2 = st.columns(2)
-                            
-                            with col1:
-                                # Calcola crescita dividendi storica
-                                dividends_hist = fetch_dividends_calendar(ticker, api_key)
-                                if dividends_hist and len(dividends_hist) >= 8:
-                                    df_div = pd.DataFrame(dividends_hist)
-                                    recent_divs = df_div.head(4)['dividend'].sum()
-                                    old_divs = df_div.iloc[4:8]['dividend'].sum()
-                                    
-                                    if old_divs > 0:
-                                        div_growth_hist = ((recent_divs / old_divs) ** 0.25 - 1)  # CAGR annualizzato
-                                    else:
-                                        div_growth_hist = terminal_growth
+                            dividends_hist = fetch_dividends_calendar(ticker, api_key)
+                            if dividends_hist and len(dividends_hist) >= 8:
+                                df_div = pd.DataFrame(dividends_hist)
+                                recent_divs = df_div.head(4)['dividend'].sum()
+                                old_divs = df_div.iloc[4:8]['dividend'].sum()
+                                
+                                if old_divs > 0:
+                                    div_growth_hist = ((recent_divs / old_divs) ** 0.25 - 1)
                                 else:
                                     div_growth_hist = terminal_growth
-                                
-                                # Gordon Growth Model: P = D1 / (r - g)
-                                next_dividend = dividend_per_share * (1 + div_growth_hist)
-                                
-                                if discount_rate > div_growth_hist:
-                                    intrinsic_value_ddm = next_dividend / (discount_rate - div_growth_hist)
-                                    
-                                    st.metric("Dividendo per Azione", f"{get_currency_symbol(currency)}{dividend_per_share:.4f}")
-                                    st.metric("Crescita Dividendi Storica", f"{div_growth_hist*100:.2f}%")
-                                    st.metric("Dividendo Atteso (D1)", f"{get_currency_symbol(currency)}{next_dividend:.4f}")
-                                    st.metric("Valore Intrinseco DDM", f"{get_currency_symbol(currency)}{intrinsic_value_ddm:.2f}")
-                                    
-                                    if intrinsic_value_ddm > 0:
-                                        upside_ddm = ((intrinsic_value_ddm - current_price) / current_price) * 100
-                                        st.metric("Upside/Downside", f"{upside_ddm:+.1f}%", 
-                                                 delta=f"{upside_ddm:+.1f}%",
-                                                 delta_color="normal")
-                                else:
-                                    st.warning("⚠️ Il tasso di sconto deve essere maggiore della crescita dei dividendi")
+                            else:
+                                div_growth_hist = terminal_growth
                             
-                            with col2:
-                                st.markdown("** Formula Gordon Growth Model**")
-                                st.latex(r"V_0 = \frac{D_1}{r - g}")
-                                st.markdown("""
-                                Dove:
-                                - V₀ = Valore intrinseco
-                                - D₁ = Dividendo atteso prossimo anno
-                                - r = Tasso di sconto (richiesto)
-                                - g = Tasso di crescita dividendi
-                                """)
+                            next_dividend = dividend_per_share * (1 + div_growth_hist)
+                            
+                            if discount_rate > div_growth_hist:
+                                intrinsic_value_ddm = next_dividend / (discount_rate - div_growth_hist)
                                 
-                                if discount_rate > div_growth_hist:
-                                    st.info(f"""
-                                    **Calcolo:**
-                                    - D₀ = {get_currency_symbol(currency)}{dividend_per_share:.4f}
-                                    - g = {div_growth_hist*100:.2f}%
-                                    - D₁ = {get_currency_symbol(currency)}{next_dividend:.4f}
-                                    - r = {discount_rate*100:.1f}%
-                                    - V₀ = {get_currency_symbol(currency)}{intrinsic_value_ddm:.2f}
-                                    """)
-                        else:
-                            st.warning("⚠️ Azienda non paga dividendi - DDM non applicabile")
-                        
-                        st.markdown("---")
+                                if intrinsic_value_ddm > 0:
+                                    valuations.append({
+                                        'Modello': 'DDM (Gordon Growth)',
+                                        'Valore Intrinseco': intrinsic_value_ddm,
+                                        'Upside/Downside': ((intrinsic_value_ddm - current_price) / current_price) * 100
+                                    })
                         
                         # 3. P/E Multiple Analysis
-                        st.subheader("3. Valutazione Multipli (P/E)")
-                        
                         eps = safe_get(latest_income, 'eps', 0)
+                        intrinsic_value_pe_avg = 0
                         
                         if eps > 0 and ratios_data:
-                            # Calcola P/E medio storico PRIMA di creare le colonne
                             df_ratios_hist = pd.DataFrame(ratios_data)
                             pe_values = df_ratios_hist['priceEarningsRatio'].dropna()
-                            pe_values = pe_values[(pe_values > 0) & (pe_values < 100)]  # Filtro outlier
+                            pe_values = pe_values[(pe_values > 0) & (pe_values < 100)]
                             
                             if len(pe_values) > 0:
                                 pe_avg = pe_values.mean()
                                 pe_median = pe_values.median()
                                 
-                                # ORA crea le colonne, dopo aver calcolato pe_avg
-                                col1, col2 = st.columns(2)
+                                intrinsic_value_pe_avg = eps * pe_avg
+                                intrinsic_value_pe_med = eps * pe_median
                                 
-                                with col1:
-                                    intrinsic_value_pe_avg = eps * pe_avg
-                                    intrinsic_value_pe_med = eps * pe_median
-                                    
-                                    st.metric("EPS Corrente", f"{get_currency_symbol(currency)}{eps:.2f}")
-                                    st.metric("P/E Medio Storico", f"{pe_avg:.2f}x")
-                                    st.metric("P/E Mediano Storico", f"{pe_median:.2f}x")
-                                    st.metric("Valore con P/E Medio", f"{get_currency_symbol(currency)}{intrinsic_value_pe_avg:.2f}")
-                                    st.metric("Valore con P/E Mediano", f"{get_currency_symbol(currency)}{intrinsic_value_pe_med:.2f}")
-                                    
-                                    upside_pe = ((intrinsic_value_pe_avg - current_price) / current_price) * 100
-                                    st.metric("Upside/Downside (P/E Avg)", f"{upside_pe:+.1f}%", 
-                                             delta=f"{upside_pe:+.1f}%",
-                                             delta_color="normal")
-                                
-                                with col2:
-                                    # Grafico P/E storico
-                                    fig_pe = go.Figure()
-                                    
-                                    df_ratios_plot = df_ratios_hist.sort_values('date')
-                                    df_ratios_plot['year'] = pd.to_datetime(df_ratios_plot['date']).dt.year
-                                    
-                                    fig_pe.add_trace(go.Scatter(
-                                        x=df_ratios_plot['year'],
-                                        y=df_ratios_plot['priceEarningsRatio'],
-                                        mode='lines+markers',
-                                        name='P/E Ratio',
-                                        line=dict(color='#1f77b4', width=3)
-                                    ))
-                                    
-                                    # Linea P/E medio (ora pe_avg è accessibile!)
-                                    fig_pe.add_hline(y=pe_avg, line_dash="dash", line_color="green", 
-                                                    annotation_text=f"Media: {pe_avg:.2f}x")
-                                    
-                                    fig_pe.update_layout(
-                                        title="P/E Ratio Storico",
-                                        xaxis_title="Anno",
-                                        yaxis_title="P/E Ratio",
-                                        template='plotly_white',
-                                        height=350
-                                    )
-                                    
-                                    st.plotly_chart(fig_pe, use_container_width=True)
-                            else:
-                                st.warning("⚠️ Dati P/E insufficienti per l'analisi dei multipli")
-                        else:
-                            st.warning("⚠️ EPS non disponibile o negativo")
-                        
-                        st.markdown("---")
+                                valuations.append({
+                                    'Modello': 'P/E Multipli (Media)',
+                                    'Valore Intrinseco': intrinsic_value_pe_avg,
+                                    'Upside/Downside': ((intrinsic_value_pe_avg - current_price) / current_price) * 100
+                                })
                         
                         # 4. Book Value Analysis
-                        st.subheader("4. Analisi Book Value (P/B)")
-                        
                         equity = safe_get(latest_balance, 'totalStockholdersEquity', 0)
                         if equity == 0:
                             equity = safe_get(latest_balance, 'totalEquity', 0)
@@ -1810,347 +1696,152 @@ if st.session_state.analyzed:
                         if shares == 0:
                             shares = safe_get(latest_income, 'weightedAverageShsOut', 0)
                         
+                        intrinsic_value_pb = 0
+                        
                         if equity > 0 and shares > 0:
-                            col1, col2 = st.columns(2)
+                            book_value_per_share = equity / shares
                             
-                            with col1:
-                                book_value_per_share = equity / shares
+                            if ratios_data:
+                                df_ratios_hist = pd.DataFrame(ratios_data)
+                                pb_values = df_ratios_hist.get('priceToBookRatio', pd.Series([]))
+                                pb_values = pb_values.dropna()
+                                pb_values = pb_values[(pb_values > 0) & (pb_values < 20)]
                                 
-                                # Calcola P/B medio storico
-                                if ratios_data:
-                                    df_ratios_hist = pd.DataFrame(ratios_data)
-                                    pb_values = df_ratios_hist.get('priceToBookRatio', pd.Series([]))
-                                    pb_values = pb_values.dropna()
-                                    pb_values = pb_values[(pb_values > 0) & (pb_values < 20)]  # Filtro outlier
-                                    
-                                    if len(pb_values) > 0:
-                                        pb_avg = pb_values.mean()
-                                        intrinsic_value_pb = book_value_per_share * pb_avg
-                                        
-                                        current_pb = current_price / book_value_per_share if book_value_per_share > 0 else 0
-                                        
-                                        st.metric("Book Value per Azione", f"{get_currency_symbol(currency)}{book_value_per_share:.2f}")
-                                        st.metric("P/B Corrente", f"{current_pb:.2f}x")
-                                        st.metric("P/B Medio Storico", f"{pb_avg:.2f}x")
-                                        st.metric("Valore con P/B Medio", f"{get_currency_symbol(currency)}{intrinsic_value_pb:.2f}")
-                                        
-                                        upside_pb = ((intrinsic_value_pb - current_price) / current_price) * 100
-                                        st.metric("Upside/Downside", f"{upside_pb:+.1f}%", 
-                                                 delta=f"{upside_pb:+.1f}%",
-                                                 delta_color="normal")
-                            
-                            with col2:
                                 if len(pb_values) > 0:
-                                    # Grafico P/B storico
-                                    fig_pb = go.Figure()
+                                    pb_avg = pb_values.mean()
+                                    intrinsic_value_pb = book_value_per_share * pb_avg
                                     
-                                    df_ratios_plot = df_ratios_hist.sort_values('date')
-                                    df_ratios_plot['year'] = pd.to_datetime(df_ratios_plot['date']).dt.year
-                                    
-                                    fig_pb.add_trace(go.Scatter(
-                                        x=df_ratios_plot['year'],
-                                        y=df_ratios_plot.get('priceToBookRatio', []),
-                                        mode='lines+markers',
-                                        name='P/B Ratio',
-                                        line=dict(color='#ff7f0e', width=3)
-                                    ))
-                                    
-                                    # Linea P/B medio
-                                    fig_pb.add_hline(y=pb_avg, line_dash="dash", line_color="green", 
-                                                    annotation_text=f"Media: {pb_avg:.2f}x")
-                                    
-                                    fig_pb.update_layout(
-                                        title="P/B Ratio Storico",
-                                        xaxis_title="Anno",
-                                        yaxis_title="P/B Ratio",
-                                        template='plotly_white',
-                                        height=350
-                                    )
-                                    
-                                    st.plotly_chart(fig_pb, use_container_width=True)
-                        else:
-                            st.warning("⚠️ Dati Patrimonio Netto o Azioni non disponibili")
+                                    valuations.append({
+                                        'Modello': 'P/B Multipli (Media)',
+                                        'Valore Intrinseco': intrinsic_value_pb,
+                                        'Upside/Downside': ((intrinsic_value_pb - current_price) / current_price) * 100
+                                    })
                         
-                        st.markdown("---")
-                        
-                        # 5. FCFE Model (Free Cash Flow to Equity)
-                        st.subheader("5. FCFE - Free Cash Flow to Equity")
-                        
-                        # Calcolo FCFE = FCF + Net Borrowing - Debt Repayment
+                        # 5. FCFE Model
                         fcf = safe_get(latest_cashflow, 'freeCashFlow', 0)
                         debt_repayment = safe_get(latest_cashflow, 'debtRepayment', 0)
                         net_borrowings = safe_get(latest_cashflow, 'netBorrowings', 0)
+                        intrinsic_value_fcfe = 0
                         
                         if fcf != 0:
-                            col1, col2 = st.columns(2)
+                            fcfe_current = fcf + net_borrowings - abs(debt_repayment)
                             
-                            with col1:
-                                # FCFE = FCF + Net Borrowings - Debt Repayment
-                                fcfe_current = fcf + net_borrowings - abs(debt_repayment)
+                            if len(df_cashflow_hist) >= 3:
+                                fcfe_values = []
+                                for _, row in df_cashflow_hist.head(5).iterrows():
+                                    fcf_h = safe_get(row, 'freeCashFlow', 0)
+                                    debt_rep_h = safe_get(row, 'debtRepayment', 0)
+                                    net_bor_h = safe_get(row, 'netBorrowings', 0)
+                                    fcfe_h = fcf_h + net_bor_h - abs(debt_rep_h)
+                                    fcfe_values.append(fcfe_h)
                                 
-                                # Calcola crescita storica FCFE
-                                if len(df_cashflow_hist) >= 3:
-                                    fcfe_values = []
-                                    for _, row in df_cashflow_hist.head(5).iterrows():
-                                        fcf_h = safe_get(row, 'freeCashFlow', 0)
-                                        debt_rep_h = safe_get(row, 'debtRepayment', 0)
-                                        net_bor_h = safe_get(row, 'netBorrowings', 0)
-                                        fcfe_h = fcf_h + net_bor_h - abs(debt_rep_h)
-                                        fcfe_values.append(fcfe_h)
-                                    
-                                    fcfe_growth_rates = []
-                                    for i in range(len(fcfe_values)-1):
-                                        if fcfe_values[i+1] != 0 and fcfe_values[i] != 0:
-                                            growth = ((fcfe_values[i] / fcfe_values[i+1]) - 1) * 100
-                                            if -50 < growth < 200:  # Filtro outlier
-                                                fcfe_growth_rates.append(growth)
-                                    
-                                    avg_fcfe_growth = sum(fcfe_growth_rates) / len(fcfe_growth_rates) if fcfe_growth_rates else 5.0
-                                    avg_fcfe_growth = max(-10.0, min(100.0, avg_fcfe_growth))
-                                else:
-                                    avg_fcfe_growth = 5.0
+                                fcfe_growth_rates = []
+                                for i in range(len(fcfe_values)-1):
+                                    if fcfe_values[i+1] != 0 and fcfe_values[i] != 0:
+                                        growth = ((fcfe_values[i] / fcfe_values[i+1]) - 1) * 100
+                                        if -50 < growth < 200:
+                                            fcfe_growth_rates.append(growth)
                                 
-                                fcfe_growth_rate = avg_fcfe_growth / 100
-                                
-                                # Proiezioni FCFE
-                                fcfe_projections = []
-                                for year in range(1, projection_years + 1):
-                                    fcfe_projected = fcfe_current * ((1 + fcfe_growth_rate) ** year)
-                                    pv = fcfe_projected / ((1 + discount_rate) ** year)
-                                    fcfe_projections.append({
-                                        'Anno': year,
-                                        'FCFE Proiettato': fcfe_projected,
-                                        'Valore Attuale': pv
-                                    })
-                                
-                                df_fcfe = pd.DataFrame(fcfe_projections)
-                                
-                                # Terminal Value
-                                fcfe_terminal_year = fcfe_current * ((1 + fcfe_growth_rate) ** projection_years)
-                                terminal_value_fcfe = (fcfe_terminal_year * (1 + terminal_growth)) / (discount_rate - terminal_growth)
-                                terminal_value_fcfe_pv = terminal_value_fcfe / ((1 + discount_rate) ** projection_years)
-                                
-                                # Equity Value (già diretto, non serve sottrarre debito)
-                                pv_fcfe_sum = df_fcfe['Valore Attuale'].sum()
-                                equity_value_fcfe = pv_fcfe_sum + terminal_value_fcfe_pv
-                                
-                                # Shares e Valore per Azione
-                                shares = safe_get(latest_income, 'weightedAverageShsOutDil', 0)
-                                if shares == 0:
-                                    shares = safe_get(latest_income, 'weightedAverageShsOut', 0)
-                                
-                                intrinsic_value_fcfe = equity_value_fcfe / shares if shares > 0 else 0
-                                
-                                # Metriche
-                                st.metric("FCFE Corrente", format_currency(fcfe_current, currency))
-                                st.metric("Crescita FCFE Storica", f"{avg_fcfe_growth:.1f}%")
-                                st.metric("Equity Value (FCFE)", format_currency(equity_value_fcfe, currency))
-                                st.metric("Valore Intrinseco FCFE", f"{get_currency_symbol(currency)}{intrinsic_value_fcfe:.2f}")
-                                
-                                if intrinsic_value_fcfe > 0:
-                                    upside_fcfe = ((intrinsic_value_fcfe - current_price) / current_price) * 100
-                                    st.metric("Upside/Downside", f"{upside_fcfe:+.1f}%", 
-                                             delta=f"{upside_fcfe:+.1f}%",
-                                             delta_color="normal")
+                                avg_fcfe_growth = sum(fcfe_growth_rates) / len(fcfe_growth_rates) if fcfe_growth_rates else 5.0
+                                avg_fcfe_growth = max(-10.0, min(100.0, avg_fcfe_growth))
+                            else:
+                                avg_fcfe_growth = 5.0
                             
-                            with col2:
-                                st.markdown("**Proiezioni FCFE**")
-                                
-                                # Mostra tabella proiezioni
-                                display_fcfe = df_fcfe.copy()
-                                display_fcfe['FCFE Proiettato'] = display_fcfe['FCFE Proiettato'].apply(lambda x: format_currency(x, currency))
-                                display_fcfe['Valore Attuale'] = display_fcfe['Valore Attuale'].apply(lambda x: format_currency(x, currency))
-                                st.dataframe(display_fcfe, use_container_width=True, hide_index=True)
-                                
-                                st.markdown(f"**Terminal Value:** {format_currency(terminal_value_fcfe, currency)}")
-                                st.markdown(f"**Terminal Value (PV):** {format_currency(terminal_value_fcfe_pv, currency)}")
-                                st.markdown(f"**Somma VP FCFE:** {format_currency(pv_fcfe_sum, currency)}")
-                                
-                                st.info("""
-                                **FCFE vs DCF:**
-                                - FCFE valuta direttamente l'equity (azionisti)
-                                - DCF valuta l'impresa (enterprise value)
-                                - FCFE incorpora i flussi di debito
-                                """)
-                        else:
-                            st.warning("⚠️ Dati insufficienti per calcolare il FCFE")
+                            fcfe_growth_rate = avg_fcfe_growth / 100
+                            
+                            fcfe_projections = []
+                            for year in range(1, projection_years + 1):
+                                fcfe_projected = fcfe_current * ((1 + fcfe_growth_rate) ** year)
+                                pv = fcfe_projected / ((1 + discount_rate) ** year)
+                                fcfe_projections.append({
+                                    'Anno': year,
+                                    'FCFE Proiettato': fcfe_projected,
+                                    'Valore Attuale': pv
+                                })
+                            
+                            df_fcfe = pd.DataFrame(fcfe_projections)
+                            
+                            fcfe_terminal_year = fcfe_current * ((1 + fcfe_growth_rate) ** projection_years)
+                            terminal_value_fcfe = (fcfe_terminal_year * (1 + terminal_growth)) / (discount_rate - terminal_growth)
+                            terminal_value_fcfe_pv = terminal_value_fcfe / ((1 + discount_rate) ** projection_years)
+                            
+                            pv_fcfe_sum = df_fcfe['Valore Attuale'].sum()
+                            equity_value_fcfe = pv_fcfe_sum + terminal_value_fcfe_pv
+                            
+                            shares = safe_get(latest_income, 'weightedAverageShsOutDil', 0)
+                            if shares == 0:
+                                shares = safe_get(latest_income, 'weightedAverageShsOut', 0)
+                            
+                            intrinsic_value_fcfe = equity_value_fcfe / shares if shares > 0 else 0
+                            
+                            if intrinsic_value_fcfe > 0:
+                                valuations.append({
+                                    'Modello': 'FCFE (Free Cash Flow to Equity)',
+                                    'Valore Intrinseco': intrinsic_value_fcfe,
+                                    'Upside/Downside': ((intrinsic_value_fcfe - current_price) / current_price) * 100
+                                })
                         
-                        st.markdown("---")
-                        
-                        # 6. Graham Number (Value Investing)
-                        st.subheader("6. Numero di Graham (Value Investing)")
-                        
-                        eps = safe_get(latest_income, 'eps', 0)
+                        # 6. Graham Number
+                        eps_graham = safe_get(latest_income, 'eps', 0)
                         book_value_per_share_graham = equity / shares if (equity > 0 and shares > 0) else 0
+                        graham_value_avg = 0
                         
-                        if eps > 0 and book_value_per_share_graham > 0:
-                            col1, col2 = st.columns(2)
+                        if eps_graham > 0 and book_value_per_share_graham > 0:
+                            graham_number = (22.5 * eps_graham * book_value_per_share_graham) ** 0.5
                             
-                            with col1:
-                                # Formula di Graham: V = √(22.5 × EPS × BVPS)
-                                graham_number = (22.5 * eps * book_value_per_share_graham) ** 0.5
-                                
-                                # Formula alternativa di Graham con crescita
-                                # V = EPS × (8.5 + 2g) × 4.4 / Y
-                                # Stima crescita EPS
-                                if len(df_income_hist) >= 3:
-                                    eps_values = df_income_hist['eps'].head(5).values
-                                    eps_growth_rates = []
-                                    for i in range(len(eps_values)-1):
-                                        if eps_values[i+1] != 0 and eps_values[i] != 0 and eps_values[i+1] > 0 and eps_values[i] > 0:
-                                            growth = ((eps_values[i] / eps_values[i+1]) - 1) * 100
-                                            if -50 < growth < 100:
-                                                eps_growth_rates.append(growth)
-                                    avg_eps_growth = sum(eps_growth_rates) / len(eps_growth_rates) if eps_growth_rates else 7.0
-                                    avg_eps_growth = max(0.0, min(30.0, avg_eps_growth))
-                                else:
-                                    avg_eps_growth = 7.0
-                                
-                                # Yield obbligazionario AAA (default 4.4%)
-                                bond_yield = 4.4
-                                
-                                graham_growth_number = eps * (8.5 + 2 * avg_eps_growth) * 4.4 / bond_yield
-                                
-                                # Media delle due formule
-                                graham_value_avg = (graham_number + graham_growth_number) / 2
-                                
-                                # Margine di sicurezza di Graham (50%)
-                                margin_of_safety_price = graham_value_avg * 0.5
-                                
-                                st.metric("EPS", f"{get_currency_symbol(currency)}{eps:.2f}")
-                                st.metric("Book Value per Share", f"{get_currency_symbol(currency)}{book_value_per_share_graham:.2f}")
-                                st.metric("Crescita EPS Storica", f"{avg_eps_growth:.1f}%")
-                                st.metric("Graham Number (Base)", f"{get_currency_symbol(currency)}{graham_number:.2f}")
-                                st.metric("Graham Number (con Crescita)", f"{get_currency_symbol(currency)}{graham_growth_number:.2f}")
-                                st.metric("Valore Graham Medio", f"{get_currency_symbol(currency)}{graham_value_avg:.2f}")
-                                
-                                upside_graham = ((graham_value_avg - current_price) / current_price) * 100
-                                st.metric("Upside/Downside", f"{upside_graham:+.1f}%", 
-                                         delta=f"{upside_graham:+.1f}%",
-                                         delta_color="normal")
+                            if len(df_income_hist) >= 3:
+                                eps_values = df_income_hist['eps'].head(5).values
+                                eps_growth_rates = []
+                                for i in range(len(eps_values)-1):
+                                    if eps_values[i+1] != 0 and eps_values[i] != 0 and eps_values[i+1] > 0 and eps_values[i] > 0:
+                                        growth = ((eps_values[i] / eps_values[i+1]) - 1) * 100
+                                        if -50 < growth < 100:
+                                            eps_growth_rates.append(growth)
+                                avg_eps_growth = sum(eps_growth_rates) / len(eps_growth_rates) if eps_growth_rates else 7.0
+                                avg_eps_growth = max(0.0, min(30.0, avg_eps_growth))
+                            else:
+                                avg_eps_growth = 7.0
                             
-                            with col2:
-                                st.markdown("** Formule di Graham**")
-                                
-                                st.markdown("**Formula Base:**")
-                                st.latex(r"V = \sqrt{22.5 \times EPS \times BVPS}")
-                                
-                                st.markdown("**Formula con Crescita:**")
-                                st.latex(r"V = EPS \times (8.5 + 2g) \times \frac{4.4}{Y}")
-                                
-                                st.markdown("""
-                                Dove:
-                                - EPS = Earnings per Share
-                                - BVPS = Book Value per Share  
-                                - g = Tasso di crescita EPS (%)
-                                - Y = Yield obbligazioni AAA (default 4.4%)
-                                """)
-                                
-                                st.markdown("---")
-                                
-                                st.markdown("**💡 Margine di Sicurezza**")
-                                st.metric("Prezzo Target (50% MoS)", f"{get_currency_symbol(currency)}{margin_of_safety_price:.2f}")
-                                
-                                if current_price <= margin_of_safety_price:
-                                    st.success("✅ Il prezzo corrente rispetta il margine di sicurezza del 50%!")
-                                else:
-                                    diff = ((current_price - margin_of_safety_price) / margin_of_safety_price) * 100
-                                    st.warning(f"⚠️ Il prezzo corrente è del {diff:.1f}% sopra il margine di sicurezza")
-                                
-                                st.info("""
-                                **Filosofia Graham:**
-                                - Investire solo con margine di sicurezza
-                                - Focus su valore intrinseco solido
-                                - Acquistare quando sottovalutato
-                                """)
-                        else:
-                            st.warning("⚠️ Dati EPS o Book Value non disponibili per calcolare il Graham Number")
+                            bond_yield = 4.4
+                            graham_growth_number = eps_graham * (8.5 + 2 * avg_eps_growth) * 4.4 / bond_yield
+                            graham_value_avg = (graham_number + graham_growth_number) / 2
+                            
+                            if graham_value_avg > 0:
+                                valuations.append({
+                                    'Modello': 'Graham Number (Value Investing)',
+                                    'Valore Intrinseco': graham_value_avg,
+                                    'Upside/Downside': ((graham_value_avg - current_price) / current_price) * 100
+                                })
                         
-                        st.markdown("---")
-                        
-                        # 7. Riepilogo Valutazioni
-                        st.subheader("Riepilogo Completo Valutazioni")
-                        
-                        valuations = []
-                        
-                        if fcf_current > 0 and intrinsic_value_dcf > 0:
-                            valuations.append({
-                                'Modello': 'DCF (Discounted Cash Flow)',
-                                'Valore Intrinseco': intrinsic_value_dcf,
-                                'Upside/Downside': ((intrinsic_value_dcf - current_price) / current_price) * 100
-                            })
-                        
-                        if dividend_per_share > 0 and 'intrinsic_value_ddm' in locals():
-                            valuations.append({
-                                'Modello': 'DDM (Gordon Growth)',
-                                'Valore Intrinseco': intrinsic_value_ddm,
-                                'Upside/Downside': ((intrinsic_value_ddm - current_price) / current_price) * 100
-                            })
-                        
-                        if eps > 0 and 'intrinsic_value_pe_avg' in locals():
-                            valuations.append({
-                                'Modello': 'P/E Multipli (Media)',
-                                'Valore Intrinseco': intrinsic_value_pe_avg,
-                                'Upside/Downside': ((intrinsic_value_pe_avg - current_price) / current_price) * 100
-                            })
-                        
-                        if 'intrinsic_value_pb' in locals():
-                            valuations.append({
-                                'Modello': 'P/B Multipli (Media)',
-                                'Valore Intrinseco': intrinsic_value_pb,
-                                'Upside/Downside': ((intrinsic_value_pb - current_price) / current_price) * 100
-                            })
-                        
-                        if 'intrinsic_value_fcfe' in locals() and intrinsic_value_fcfe > 0:
-                            valuations.append({
-                                'Modello': 'FCFE (Free Cash Flow to Equity)',
-                                'Valore Intrinseco': intrinsic_value_fcfe,
-                                'Upside/Downside': ((intrinsic_value_fcfe - current_price) / current_price) * 100
-                            })
-                        
-                        if 'graham_value_avg' in locals() and graham_value_avg > 0:
-                            valuations.append({
-                                'Modello': 'Graham Number (Value Investing)',
-                                'Valore Intrinseco': graham_value_avg,
-                                'Upside/Downside': ((graham_value_avg - current_price) / current_price) * 100
-                            })
-                        
+                        # === RIEPILOGO VALUTAZIONI IN ALTO ===
                         if valuations:
+                            st.subheader("Riepilogo Completo Valutazioni")
+                            
                             df_valuations = pd.DataFrame(valuations)
                             
-                            col1, col2 = st.columns([2, 1])
+                            # Calcolo metriche aggregate
+                            avg_intrinsic = df_valuations['Valore Intrinseco'].mean()
+                            median_intrinsic = df_valuations['Valore Intrinseco'].median()
+                            std_intrinsic = df_valuations['Valore Intrinseco'].std()
                             
-                            with col1:
-                                # Tabella riepilogo
-                                display_val = df_valuations.copy()
-                                display_val['Valore Intrinseco'] = display_val['Valore Intrinseco'].apply(
-                                    lambda x: f"{get_currency_symbol(currency)}{x:.2f}"
-                                )
-                                display_val['Upside/Downside'] = display_val['Upside/Downside'].apply(
-                                    lambda x: f"{x:+.1f}%"
-                                )
-                                display_val['Prezzo Corrente'] = f"{get_currency_symbol(currency)}{current_price:.2f}"
-                                
-                                st.dataframe(display_val, use_container_width=True, hide_index=True)
+                            avg_upside = ((avg_intrinsic - current_price) / current_price) * 100
+                            median_upside = ((median_intrinsic - current_price) / current_price) * 100
                             
-                            with col2:
-                                # Valutazione media e mediana
-                                avg_intrinsic = df_valuations['Valore Intrinseco'].mean()
-                                median_intrinsic = df_valuations['Valore Intrinseco'].median()
-                                std_intrinsic = df_valuations['Valore Intrinseco'].std()
-                                
-                                avg_upside = ((avg_intrinsic - current_price) / current_price) * 100
-                                median_upside = ((median_intrinsic - current_price) / current_price) * 100
-                                
-                                # Coefficiente di variazione (misura dispersione)
-                                cv = (std_intrinsic / avg_intrinsic * 100) if avg_intrinsic > 0 else 0
-                                
+                            # Coefficiente di variazione
+                            cv = (std_intrinsic / avg_intrinsic * 100) if avg_intrinsic > 0 else 0
+                            
+                            # Layout principale: metriche + grafico + giudizio
+                            col_metrics, col_chart = st.columns([1, 2])
+                            
+                            with col_metrics:
                                 st.metric("Prezzo Corrente", f"{get_currency_symbol(currency)}{current_price:.2f}")
                                 st.metric("Valore Medio", f"{get_currency_symbol(currency)}{avg_intrinsic:.2f}")
                                 st.metric("Valore Mediano", f"{get_currency_symbol(currency)}{median_intrinsic:.2f}")
                                 st.metric("Upside Medio", f"{avg_upside:+.1f}%",
-                                         delta=f"{avg_upside:+.1f}%",
-                                         delta_color="normal")
+                                        delta=f"{avg_upside:+.1f}%",
+                                        delta_color="normal")
+                                
+                                st.markdown("---")
                                 
                                 # Affidabilità della valutazione
                                 st.markdown("**Affidabilità Valutazione:**")
@@ -2163,65 +1854,344 @@ if st.session_state.analyzed:
                                 else:
                                     st.warning(f"⚠️ Bassa (CV: {cv:.1f}%)")
                                     st.caption("Alta dispersione tra i modelli")
+                            
+                            with col_chart:
+                                # Grafico comparativo
+                                fig_comp = go.Figure()
                                 
-                                st.markdown("---")
-                                
-                                # Giudizio finale
-                                st.markdown("**🎯 Giudizio Finale:**")
-                                if avg_upside > 30:
-                                    st.success("### 🟢 FORTEMENTE SOTTOVALUTATO")
-                                    st.caption(f"Basato su {len(valuations)} modelli")
-                                elif avg_upside > 15:
-                                    st.success("### 🟢 SOTTOVALUTATO")
-                                    st.caption(f"Basato su {len(valuations)} modelli")
-                                elif avg_upside > 0:
-                                    st.info("### 🟡 LEGGERMENTE SOTTOVALUTATO")
-                                    st.caption(f"Basato su {len(valuations)} modelli")
-                                elif avg_upside > -15:
-                                    st.warning("### 🟠 LEGGERMENTE SOPRAVVALUTATO")
-                                    st.caption(f"Basato su {len(valuations)} modelli")
-                                elif avg_upside > -30:
-                                    st.error("### 🔴 SOPRAVVALUTATO")
-                                    st.caption(f"Basato su {len(valuations)} modelli")
-                                else:
-                                    st.error("### 🔴 FORTEMENTE SOPRAVVALUTATO")
-                                    st.caption(f"Basato su {len(valuations)} modelli")
-                            
-                            # Grafico comparativo
-                            fig_comp = go.Figure()
-                            
-                            # Aggiungi barra prezzo corrente
-                            fig_comp.add_trace(go.Bar(
-                                name='Prezzo Corrente',
-                                x=['Prezzo Corrente'],
-                                y=[current_price],
-                                marker_color='lightgray'
-                            ))
-                            
-                            # Aggiungi barre valutazioni
-                            colors = ['#1f77b4', '#ff7f0e', '#2ca02c', '#d62728']
-                            for idx, row in df_valuations.iterrows():
+                                # Aggiungi barra prezzo corrente
                                 fig_comp.add_trace(go.Bar(
-                                    name=row['Modello'],
-                                    x=[row['Modello']],
-                                    y=[row['Valore Intrinseco']],
-                                    marker_color=colors[idx % len(colors)]
+                                    name='Prezzo Corrente',
+                                    x=['Prezzo Corrente'],
+                                    y=[current_price],
+                                    marker_color='lightgray',
+                                    text=[f"{get_currency_symbol(currency)}{current_price:.2f}"],
+                                    textposition='outside'
                                 ))
+                                
+                                # Aggiungi barre valutazioni
+                                colors = ['#1f77b4', '#ff7f0e', '#2ca02c', '#d62728', '#9467bd', '#8c564b']
+                                for idx, row in df_valuations.iterrows():
+                                    fig_comp.add_trace(go.Bar(
+                                        name=row['Modello'],
+                                        x=[row['Modello']],
+                                        y=[row['Valore Intrinseco']],
+                                        marker_color=colors[idx % len(colors)],
+                                        text=[f"{get_currency_symbol(currency)}{row['Valore Intrinseco']:.2f}"],
+                                        textposition='outside'
+                                    ))
+                                
+                                # Linea prezzo corrente
+                                fig_comp.add_hline(y=current_price, line_dash="dash", line_color="red",
+                                                annotation_text=f"Prezzo: {get_currency_symbol(currency)}{current_price:.2f}",
+                                                annotation_position="right")
+                                
+                                # Linea valore medio
+                                fig_comp.add_hline(y=avg_intrinsic, line_dash="dot", line_color="green",
+                                                annotation_text=f"Media: {get_currency_symbol(currency)}{avg_intrinsic:.2f}",
+                                                annotation_position="left")
+                                
+                                fig_comp.update_layout(
+                                    title="Confronto Valutazioni vs Prezzo Corrente",
+                                    yaxis_title=f"Valore ({get_currency_symbol(currency)})",
+                                    template='plotly_white',
+                                    height=400,
+                                    showlegend=False,
+                                    xaxis={'categoryorder':'total descending'}
+                                )
+                                
+                                st.plotly_chart(fig_comp, use_container_width=True)
                             
-                            # Linea prezzo corrente
-                            fig_comp.add_hline(y=current_price, line_dash="dash", line_color="red",
-                                              annotation_text=f"Prezzo: {get_currency_symbol(currency)}{current_price:.2f}")
+                            # Giudizio finale (full width sotto)
+                            st.markdown("---")
+                            st.markdown("** Giudizio Finale:**")
                             
-                            fig_comp.update_layout(
-                                title="Confronto Valutazioni",
-                                yaxis_title=f"Valore ({get_currency_symbol(currency)})",
-                                template='plotly_white',
-                                height=400,
-                                showlegend=True,
-                                barmode='group'
+                            if avg_upside > 30:
+                                st.success("### 🟢 FORTEMENTE SOTTOVALUTATO")
+                                st.caption(f"Potenziale upside medio del {avg_upside:.1f}% basato su {len(valuations)} modelli")
+                            elif avg_upside > 15:
+                                st.success("### 🟢 SOTTOVALUTATO")
+                                st.caption(f"Potenziale upside medio del {avg_upside:.1f}% basato su {len(valuations)} modelli")
+                            elif avg_upside > 0:
+                                st.info("### 🟡 LEGGERMENTE SOTTOVALUTATO")
+                                st.caption(f"Potenziale upside medio del {avg_upside:.1f}% basato su {len(valuations)} modelli")
+                            elif avg_upside > -15:
+                                st.warning("### 🟠 LEGGERMENTE SOPRAVVALUTATO")
+                                st.caption(f"Downside medio del {avg_upside:.1f}% basato su {len(valuations)} modelli")
+                            elif avg_upside > -30:
+                                st.error("### 🔴 SOPRAVVALUTATO")
+                                st.caption(f"Downside medio del {avg_upside:.1f}% basato su {len(valuations)} modelli")
+                            else:
+                                st.error("### 🔴 FORTEMENTE SOPRAVVALUTATO")
+                                st.caption(f"Downside medio del {avg_upside:.1f}% basato su {len(valuations)} modelli")
+                            
+                            # Tabella riepilogo
+                            st.markdown("---")
+                            st.markdown("**Dettaglio Valutazioni:**")
+                            
+                            display_val = df_valuations.copy()
+                            display_val['Valore Intrinseco'] = display_val['Valore Intrinseco'].apply(
+                                lambda x: f"{get_currency_symbol(currency)}{x:.2f}"
                             )
+                            display_val['Upside/Downside'] = display_val['Upside/Downside'].apply(
+                                lambda x: f"{x:+.1f}%"
+                            )
+                            display_val['Prezzo Corrente'] = f"{get_currency_symbol(currency)}{current_price:.2f}"
                             
-                            st.plotly_chart(fig_comp, use_container_width=True)
+                            # Riordina colonne
+                            display_val = display_val[['Modello', 'Prezzo Corrente', 'Valore Intrinseco', 'Upside/Downside']]
+                            
+                            st.dataframe(display_val, use_container_width=True, hide_index=True)
+                            
+                            st.markdown("---")
+                            
+                            # === DETTAGLIO CALCOLI SOTTO ===
+                            st.subheader(" Dettaglio Metodi di Valutazione")
+                            
+                            # 1. DCF Model
+                            if intrinsic_value_dcf > 0:
+                                with st.expander("**1️⃣ DCF - Discounted Cash Flow**", expanded=False):
+                                    col1, col2 = st.columns(2)
+                                    
+                                    with col1:
+                                        st.metric("FCF Corrente", format_currency(fcf_current, currency))
+                                        st.metric("Enterprise Value", format_currency(enterprise_value, currency))
+                                        st.metric("Equity Value", format_currency(equity_value, currency))
+                                        st.metric("Valore Intrinseco DCF", f"{get_currency_symbol(currency)}{intrinsic_value_dcf:.2f}")
+                                        
+                                        upside_dcf = ((intrinsic_value_dcf - current_price) / current_price) * 100
+                                        st.metric("Upside/Downside", f"{upside_dcf:+.1f}%", 
+                                                delta=f"{upside_dcf:+.1f}%",
+                                                delta_color="normal")
+                                    
+                                    with col2:
+                                        st.markdown("**Proiezioni Free Cash Flow**")
+                                        display_fcf = df_fcf.copy()
+                                        display_fcf['FCF Proiettato'] = display_fcf['FCF Proiettato'].apply(lambda x: format_currency(x, currency))
+                                        display_fcf['Valore Attuale'] = display_fcf['Valore Attuale'].apply(lambda x: format_currency(x, currency))
+                                        st.dataframe(display_fcf, use_container_width=True, hide_index=True)
+                                        
+                                        st.markdown(f"**Terminal Value:** {format_currency(terminal_value, currency)}")
+                                        st.markdown(f"**Terminal Value (PV):** {format_currency(terminal_value_pv, currency)}")
+                                        st.markdown(f"**Somma VP FCF:** {format_currency(pv_fcf_sum, currency)}")
+                            
+                            # 2. DDM Model
+                            if intrinsic_value_ddm > 0:
+                                with st.expander("**2️⃣ DDM - Dividend Discount Model (Gordon Growth)**", expanded=False):
+                                    col1, col2 = st.columns(2)
+                                    
+                                    with col1:
+                                        st.metric("Dividendo per Azione", f"{get_currency_symbol(currency)}{dividend_per_share:.4f}")
+                                        st.metric("Crescita Dividendi Storica", f"{div_growth_hist*100:.2f}%")
+                                        st.metric("Dividendo Atteso (D1)", f"{get_currency_symbol(currency)}{next_dividend:.4f}")
+                                        st.metric("Valore Intrinseco DDM", f"{get_currency_symbol(currency)}{intrinsic_value_ddm:.2f}")
+                                        
+                                        upside_ddm = ((intrinsic_value_ddm - current_price) / current_price) * 100
+                                        st.metric("Upside/Downside", f"{upside_ddm:+.1f}%", 
+                                                delta=f"{upside_ddm:+.1f}%",
+                                                delta_color="normal")
+                                    
+                                    with col2:
+                                        st.markdown("** Formula Gordon Growth Model**")
+                                        st.latex(r"V_0 = \frac{D_1}{r - g}")
+                                        st.markdown("""
+                                        Dove:
+                                        - V₀ = Valore intrinseco
+                                        - D₁ = Dividendo atteso prossimo anno
+                                        - r = Tasso di sconto (richiesto)
+                                        - g = Tasso di crescita dividendi
+                                        """)
+                                        
+                                        st.info(f"""
+                                        **Calcolo:**
+                                        - D₀ = {get_currency_symbol(currency)}{dividend_per_share:.4f}
+                                        - g = {div_growth_hist*100:.2f}%
+                                        - D₁ = {get_currency_symbol(currency)}{next_dividend:.4f}
+                                        - r = {discount_rate*100:.1f}%
+                                        - V₀ = {get_currency_symbol(currency)}{intrinsic_value_ddm:.2f}
+                                        """)
+                            
+                            # 3. P/E Multiple Analysis
+                            if intrinsic_value_pe_avg > 0:
+                                with st.expander("**3️⃣ Valutazione Multipli (P/E)**", expanded=False):
+                                    col1, col2 = st.columns(2)
+                                    
+                                    with col1:
+                                        st.metric("EPS Corrente", f"{get_currency_symbol(currency)}{eps:.2f}")
+                                        st.metric("P/E Medio Storico", f"{pe_avg:.2f}x")
+                                        st.metric("P/E Mediano Storico", f"{pe_median:.2f}x")
+                                        st.metric("Valore con P/E Medio", f"{get_currency_symbol(currency)}{intrinsic_value_pe_avg:.2f}")
+                                        st.metric("Valore con P/E Mediano", f"{get_currency_symbol(currency)}{intrinsic_value_pe_med:.2f}")
+                                        
+                                        upside_pe = ((intrinsic_value_pe_avg - current_price) / current_price) * 100
+                                        st.metric("Upside/Downside (P/E Avg)", f"{upside_pe:+.1f}%", 
+                                                delta=f"{upside_pe:+.1f}%",
+                                                delta_color="normal")
+                                    
+                                    with col2:
+                                        # Grafico P/E storico
+                                        fig_pe = go.Figure()
+                                        
+                                        df_ratios_plot = df_ratios_hist.sort_values('date')
+                                        df_ratios_plot['year'] = pd.to_datetime(df_ratios_plot['date']).dt.year
+                                        
+                                        fig_pe.add_trace(go.Scatter(
+                                            x=df_ratios_plot['year'],
+                                            y=df_ratios_plot['priceEarningsRatio'],
+                                            mode='lines+markers',
+                                            name='P/E Ratio',
+                                            line=dict(color='#1f77b4', width=3)
+                                        ))
+                                        
+                                        fig_pe.add_hline(y=pe_avg, line_dash="dash", line_color="green", 
+                                                        annotation_text=f"Media: {pe_avg:.2f}x")
+                                        
+                                        fig_pe.update_layout(
+                                            title="P/E Ratio Storico",
+                                            xaxis_title="Anno",
+                                            yaxis_title="P/E Ratio",
+                                            template='plotly_white',
+                                            height=350
+                                        )
+                                        
+                                        st.plotly_chart(fig_pe, use_container_width=True)
+                            
+                            # 4. Book Value Analysis
+                            if intrinsic_value_pb > 0:
+                                with st.expander("**4️⃣ Analisi Book Value (P/B)**", expanded=False):
+                                    col1, col2 = st.columns(2)
+                                    
+                                    with col1:
+                                        current_pb = current_price / book_value_per_share if book_value_per_share > 0 else 0
+                                        
+                                        st.metric("Book Value per Azione", f"{get_currency_symbol(currency)}{book_value_per_share:.2f}")
+                                        st.metric("P/B Corrente", f"{current_pb:.2f}x")
+                                        st.metric("P/B Medio Storico", f"{pb_avg:.2f}x")
+                                        st.metric("Valore con P/B Medio", f"{get_currency_symbol(currency)}{intrinsic_value_pb:.2f}")
+                                        
+                                        upside_pb = ((intrinsic_value_pb - current_price) / current_price) * 100
+                                        st.metric("Upside/Downside", f"{upside_pb:+.1f}%", 
+                                                delta=f"{upside_pb:+.1f}%",
+                                                delta_color="normal")
+                                    
+                                    with col2:
+                                        # Grafico P/B storico
+                                        fig_pb = go.Figure()
+                                        
+                                        df_ratios_plot = df_ratios_hist.sort_values('date')
+                                        df_ratios_plot['year'] = pd.to_datetime(df_ratios_plot['date']).dt.year
+                                        
+                                        fig_pb.add_trace(go.Scatter(
+                                            x=df_ratios_plot['year'],
+                                            y=df_ratios_plot.get('priceToBookRatio', []),
+                                            mode='lines+markers',
+                                            name='P/B Ratio',
+                                            line=dict(color='#ff7f0e', width=3)
+                                        ))
+                                        
+                                        fig_pb.add_hline(y=pb_avg, line_dash="dash", line_color="green", 
+                                                        annotation_text=f"Media: {pb_avg:.2f}x")
+                                        
+                                        fig_pb.update_layout(
+                                            title="P/B Ratio Storico",
+                                            xaxis_title="Anno",
+                                            yaxis_title="P/B Ratio",
+                                            template='plotly_white',
+                                            height=350
+                                        )
+                                        
+                                        st.plotly_chart(fig_pb, use_container_width=True)
+                            
+                            # 5. FCFE Model
+                            if intrinsic_value_fcfe > 0:
+                                with st.expander("**5️⃣ FCFE - Free Cash Flow to Equity**", expanded=False):
+                                    col1, col2 = st.columns(2)
+                                    
+                                    with col1:
+                                        st.metric("FCFE Corrente", format_currency(fcfe_current, currency))
+                                        st.metric("Crescita FCFE Storica", f"{avg_fcfe_growth:.1f}%")
+                                        st.metric("Equity Value (FCFE)", format_currency(equity_value_fcfe, currency))
+                                        st.metric("Valore Intrinseco FCFE", f"{get_currency_symbol(currency)}{intrinsic_value_fcfe:.2f}")
+                                        
+                                        upside_fcfe = ((intrinsic_value_fcfe - current_price) / current_price) * 100
+                                        st.metric("Upside/Downside", f"{upside_fcfe:+.1f}%", 
+                                                delta=f"{upside_fcfe:+.1f}%",
+                                                delta_color="normal")
+                                    
+                                    with col2:
+                                        st.markdown("**Proiezioni FCFE**")
+                                        
+                                        display_fcfe = df_fcfe.copy()
+                                        display_fcfe['FCFE Proiettato'] = display_fcfe['FCFE Proiettato'].apply(lambda x: format_currency(x, currency))
+                                        display_fcfe['Valore Attuale'] = display_fcfe['Valore Attuale'].apply(lambda x: format_currency(x, currency))
+                                        st.dataframe(display_fcfe, use_container_width=True, hide_index=True)
+                                        
+                                        st.markdown(f"**Terminal Value:** {format_currency(terminal_value_fcfe, currency)}")
+                                        st.markdown(f"**Terminal Value (PV):** {format_currency(terminal_value_fcfe_pv, currency)}")
+                                        st.markdown(f"**Somma VP FCFE:** {format_currency(pv_fcfe_sum, currency)}")
+                                        
+                                        st.info("""
+                                        **FCFE vs DCF:**
+                                        - FCFE valuta direttamente l'equity (azionisti)
+                                        - DCF valuta l'impresa (enterprise value)
+                                        - FCFE incorpora i flussi di debito
+                                        """)
+                            
+                            # 6. Graham Number
+                            if graham_value_avg > 0:
+                                with st.expander("**6️⃣ Numero di Graham (Value Investing)**", expanded=False):
+                                    col1, col2 = st.columns(2)
+                                    
+                                    with col1:
+                                        margin_of_safety_price = graham_value_avg * 0.5
+                                        
+                                        st.metric("EPS", f"{get_currency_symbol(currency)}{eps_graham:.2f}")
+                                        st.metric("Book Value per Share", f"{get_currency_symbol(currency)}{book_value_per_share_graham:.2f}")
+                                        st.metric("Crescita EPS Storica", f"{avg_eps_growth:.1f}%")
+                                        st.metric("Graham Number (Base)", f"{get_currency_symbol(currency)}{graham_number:.2f}")
+                                        st.metric("Graham Number (con Crescita)", f"{get_currency_symbol(currency)}{graham_growth_number:.2f}")
+                                        st.metric("Valore Graham Medio", f"{get_currency_symbol(currency)}{graham_value_avg:.2f}")
+                                        
+                                        upside_graham = ((graham_value_avg - current_price) / current_price) * 100
+                                        st.metric("Upside/Downside", f"{upside_graham:+.1f}%", 
+                                                delta=f"{upside_graham:+.1f}%",
+                                                delta_color="normal")
+                                    
+                                    with col2:
+                                        st.markdown("**📊 Formule di Graham**")
+                                        
+                                        st.markdown("**Formula Base:**")
+                                        st.latex(r"V = \sqrt{22.5 \times EPS \times BVPS}")
+                                        
+                                        st.markdown("**Formula con Crescita:**")
+                                        st.latex(r"V = EPS \times (8.5 + 2g) \times \frac{4.4}{Y}")
+                                        
+                                        st.markdown("""
+                                        Dove:
+                                        - EPS = Earnings per Share
+                                        - BVPS = Book Value per Share  
+                                        - g = Tasso di crescita EPS (%)
+                                        - Y = Yield obbligazioni AAA (default 4.4%)
+                                        """)
+                                        
+                                        st.markdown("---")
+                                        
+                                        st.markdown("**💡 Margine di Sicurezza**")
+                                        st.metric("Prezzo Target (50% MoS)", f"{get_currency_symbol(currency)}{margin_of_safety_price:.2f}")
+                                        
+                                        if current_price <= margin_of_safety_price:
+                                            st.success("✅ Il prezzo corrente rispetta il margine di sicurezza del 50%!")
+                                        else:
+                                            diff = ((current_price - margin_of_safety_price) / margin_of_safety_price) * 100
+                                            st.warning(f"⚠️ Il prezzo corrente è del {diff:.1f}% sopra il margine di sicurezza")
+                                        
+                                        st.info("""
+                                        **Filosofia Graham:**
+                                        - Investire solo con margine di sicurezza
+                                        - Focus su valore intrinseco solido
+                                        - Acquistare quando sottovalutato
+                                        """)
+                        
                         else:
                             st.warning("⚠️ Nessun modello di valutazione disponibile con i dati attuali")
                         
@@ -2236,6 +2206,7 @@ if st.session_state.analyzed:
                     
                     else:
                         st.warning("⚠️ Dati insufficienti per la valutazione")
+
                 # TAB 6: Stime Analisti
                 with tab6:
                     st.header("Stime degli Analisti")
